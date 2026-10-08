@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ops Review</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M2 14.5 22 6l-6.5 14-3-6.5L2 14.5Z%27 fill=%27%231d4e89%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="/" id="brand">Empty Leg Tracker</a>
+      <span class="faint">Operations</span>
+      <nav class="links"><a href="/">Traveler site</a><a href="/operator">Operator portal</a></nav>
+    </div>
+  </header>
+  <main class="wrap">
+    <section id="login" class="card pad" style="max-width:460px;margin:48px auto">
+      <h2>Ops sign in</h2>
+      <form class="stack" id="login-form"><label>Admin key<input id="key" required autocomplete="off" placeholder="dev_admin_key"></label><button>Sign in</button></form>
+    </section>
+    <section id="ops" hidden>
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="review" aria-selected="true">Review queue</button>
+        <button role="tab" data-tab="errors" aria-selected="false">Feed errors</button>
+        <button role="tab" data-tab="outbox" aria-selected="false">Notifications</button>
+        <button role="tab" data-tab="ledger" aria-selected="false">Ledger</button>
+      </div>
+      <div id="panel"></div>
+    </section>
+  </main>
+  <script type="module">
+    import { api, esc, money, when, toast, LOGO } from './common.js';
+    const $ = (s) => document.querySelector(s);
+    $('#brand').insertAdjacentHTML('afterbegin', LOGO);
+    let key = sessionStorage.getItem('adminKey') || '';
+    let tab = 'review';
+
+    const views = {
+      async review() {
+        const rows = await api('/api/admin/review', { key });
+        return `<p class="muted">Legs held back from travelers (or listed with advisories). Conflicts come from feed reconciliation; price failures from pricing guardrails.</p>
+        <div class="card scroll-x"><table class="data"><thead><tr><th>Leg</th><th>Operator</th><th>Listed</th><th>Why</th><th>Price</th><th></th></tr></thead><tbody>
+        ${rows.map((r) => `<tr>
+          <td><strong>${esc(r.leg.from.iata)} → ${esc(r.leg.to.iata)}</strong> ${esc(r.leg.tail)}<div class="faint">${esc(when(r.leg.departEarliest))} · conf ${r.leg.confidence}</div></td>
+          <td>${esc(r.operator ?? '—')}</td>
+          <td>${r.listed ? '<span class="tag good">yes</span>' : '<span class="tag bad">no</span>'}</td>
+          <td>${r.conflicts.map((c) => `<div class="${c.blocking ? '' : 'faint'}"><code>${esc(c.code)}</code> ${esc(c.detail)}${c.values ? `<div class="faint">${c.values.map((v) => `${esc(v.sourceId)}: ${esc(v.value)}`).join(' · ')}</div>` : ''}</div>`).join('')}
+              ${r.priceFailures.map((f) => `<div><code>${esc(f.code)}</code> ${esc(f.message)}</div>`).join('')}</td>
+          <td class="num">${r.candidatePriceCents ? money(r.candidatePriceCents) : '—'}${r.lastPublishedPriceCents ? `<div class="faint">was ${money(r.lastPublishedPriceCents)}</div>` : ''}</td>
+          <td>${r.priceFailures.some((f) => f.code === 'PRICE_JUMP') ? `<button class="small" data-approve="${esc(r.leg.id)}">Approve price</button>` : ''}</td>
+        </tr>`).join('')}</tbody></table></div>`;
+      },
+      async errors() {
+        const rows = await api('/api/admin/ingest-errors', { key });
+        if (!rows.length) return '<div class="card empty">No rejected feed records.</div>';
+        return `<div class="card scroll-x"><table class="data"><thead><tr><th>When</th><th>Source</th><th>Record</th><th>Problem</th></tr></thead><tbody>
+          ${rows.map((r) => `<tr><td>${esc(when(new Date(r.received_at).toISOString()))}</td><td>${esc(r.source_id)}</td><td>${esc(r.external_id ?? '—')}</td><td><code>${esc(r.code)}</code> ${esc(r.message)}</td></tr>`).join('')}</tbody></table></div>`;
+      },
+      async outbox() {
+        const rows = await api('/api/admin/notifications', { key });
+        if (!rows.length) return '<div class="card empty">No notifications yet. Create a route alert or a booking.</div>';
+        return `<div class="card scroll-x"><table class="data"><thead><tr><th>To</th><th>Subject</th><th>Body</th><th>Sent</th></tr></thead><tbody>
+          ${rows.map((r) => `<tr><td>${esc(r.recipient)}</td><td>${esc(r.subject)}</td><td class="faint">${esc(r.body)}</td><td>${r.sent_at ? '✓' : 'queued'}</td></tr>`).join('')}</tbody></table></div>`;
+      },
+      async ledger() {
+        const rows = await api('/api/admin/ledger', { key });
+        if (!rows.length) return '<div class="card empty">No captured payments yet.</div>';
+        return `<p class="muted">Balances across all bookings. Postings are balanced: they always sum to zero.</p><div class="card scroll-x"><table class="data"><thead><tr><th>Account</th><th>Balance</th></tr></thead><tbody>
+          ${rows.map((r) => `<tr><td>${esc(r.account)}</td><td class="num">${money(r.balance_cents, { cents: true })}</td></tr>`).join('')}</tbody></table></div>`;
+      },
+    };
+
+    async function render() {
+      try { $('#panel').innerHTML = await views[tab](); } catch (e) { toast(e.message); }
+    }
+    async function signIn(k) {
+      await api('/api/admin/sources', { key: k });
+      key = k;
+      sessionStorage.setItem('adminKey', k);
+      $('#login').hidden = true;
+      $('#ops').hidden = false;
+      render();
+    }
+    $('#login-form').addEventListener('submit', (e) => { e.preventDefault(); signIn($('#key').value.trim()).catch((err) => toast(err.message)); });
+    document.querySelector('.tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tab]');
+      if (!b) return;
+      tab = b.dataset.tab;
+      document.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
+      render();
+    });
+    $('#panel').addEventListener('click', async (e) => {
+      const a = e.target.closest('[data-approve]');
+      if (!a) return;
+      try { const r = await api(`/api/admin/legs/${a.dataset.approve}/approve-price`, { method: 'POST', key }); toast(`Approved at ${money(r.approvedPriceCents)}`); render(); } catch (err) { toast(err.message); }
+    });
+    if (key) signIn(key).catch(() => sessionStorage.removeItem('adminKey'));
+  </script>
+</body>
+</html>

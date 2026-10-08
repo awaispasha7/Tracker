@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operator Portal</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M2 14.5 22 6l-6.5 14-3-6.5L2 14.5Z%27 fill=%27%231d4e89%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="/" id="brand">Empty Leg Tracker</a>
+      <span class="faint">Operator portal</span>
+      <nav class="links"><a href="/">Traveler site</a><a href="#" id="logout" hidden>Sign out</a></nav>
+    </div>
+  </header>
+  <main class="wrap">
+    <section id="login" class="card pad" style="max-width:460px;margin:48px auto">
+      <h2>Sign in</h2>
+      <p class="muted">Use your operator API key. In the demo, try <code>dev_op_skyline</code>, <code>dev_op_coastal</code>, <code>dev_op_pacific</code> or <code>dev_op_alpine</code>.</p>
+      <form class="stack" id="login-form"><label>API key<input id="key" required autocomplete="off"></label><button>Sign in</button></form>
+    </section>
+
+    <section id="portal" hidden>
+      <div class="hero" style="padding-bottom:0"><h1 id="op-name"></h1><p class="muted" id="op-meta"></p></div>
+      <div class="tabs" role="tablist">
+        <button role="tab" data-tab="bookings" aria-selected="true">Booking requests</button>
+        <button role="tab" data-tab="legs" aria-selected="false">Empty legs</button>
+        <button role="tab" data-tab="post" aria-selected="false">Post legs</button>
+        <button role="tab" data-tab="fleet" aria-selected="false">Fleet</button>
+      </div>
+      <div data-panel="bookings"></div>
+      <div data-panel="legs" hidden></div>
+      <div data-panel="post" hidden>
+        <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">
+          <form class="card pad stack" id="post-one">
+            <h2>Post one leg</h2>
+            <label>Aircraft<select id="p-tail"></select></label>
+            <div class="grid2"><label>From (ICAO/IATA)<input id="p-from" required placeholder="TEB"></label><label>To<input id="p-to" required placeholder="PBI"></label></div>
+            <div class="grid2"><label>Earliest departure<input id="p-early" type="datetime-local" required></label><label>Latest departure<input id="p-late" type="datetime-local"></label></div>
+            <div class="grid2"><label>Your net ask<input id="p-price" type="number" min="0" step="100" placeholder="Leave blank = we price it"></label>
+              <label>Currency<select id="p-ccy"><option>USD</option><option>EUR</option><option>GBP</option><option>CHF</option></select></label></div>
+            <button>Publish</button>
+            <p class="faint" style="margin:0">Your ask is what you receive. We add fees, taxes and our service fee on top, and show travelers one all-in price.</p>
+          </form>
+          <form class="card pad stack" id="post-csv">
+            <h2>Bulk upload (CSV)</h2>
+            <textarea id="csv" rows="8">tail,from,to,earliest,latest,price,currency,status
+</textarea>
+            <button>Upload</button>
+            <p class="faint" style="margin:0">Times in ISO-8601 with offset, e.g. <code>2026-10-20T14:00:00Z</code>. Machine integrations: <code>POST /api/feeds/api:&lt;operator&gt;</code> with your feed key.</p>
+          </form>
+        </div>
+        <div id="post-result" style="margin-top:16px"></div>
+      </div>
+      <div data-panel="fleet" hidden></div>
+    </section>
+  </main>
+  <script type="module" src="/operator.js"></script>
+</body>
+</html>

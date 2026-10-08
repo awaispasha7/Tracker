@@ -1,0 +1,21 @@
+{
+  "name": "emptyleg-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Real-time marketplace for empty-leg private charter flights",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/server.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.ts",
+    "seed": "node --disable-warning=ExperimentalWarning scripts/seed.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "~5.9.3"
+  }
+}

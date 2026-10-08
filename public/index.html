@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Empty Leg Tracker</title>
+  <meta name="description" content="Book whole private jets on repositioning flights, at one all-in price well below full charter.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M2 14.5 22 6l-6.5 14-3-6.5L2 14.5Z%27 fill=%27%231d4e89%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="/" id="brand">Empty Leg Tracker</a>
+      <span class="live off" id="live">connecting…</span>
+      <nav class="links">
+        <a href="#alerts" id="alerts-link">Route alerts</a>
+        <a href="/operator">For operators</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1>Private jets flying empty, at a fraction of charter.</h1>
+      <p class="muted">Operators list the repositioning flights they're already flying. You book the whole aircraft at one all-in price — taxes and fees included — typically 40–70% below a regular one-way charter.</p>
+    </section>
+
+    <div class="card">
+      <form class="search" id="search">
+        <label>From<input id="from" placeholder="City or airport" autocomplete="off" required></label>
+        <label>To<input id="to" placeholder="Anywhere" autocomplete="off"></label>
+        <label>Date<input id="date" type="date"></label>
+        <label>± days
+          <select id="flex"><option>0</option><option>1</option><option selected>2</option><option>3</option><option>7</option></select>
+        </label>
+        <label>Passengers<input id="pax" type="number" min="1" max="19" value="2"></label>
+        <button class="go" type="submit">Search</button>
+      </form>
+      <div class="chips" id="cats" aria-label="Aircraft category"></div>
+    </div>
+
+    <div class="toolbar">
+      <strong id="count"></strong>
+      <label style="grid-auto-flow:column;align-items:center;gap:8px">Sort
+        <select id="sort" style="width:auto"><option value="best">Best match</option><option value="price">Lowest price</option><option value="departure">Soonest</option></select>
+      </label>
+      <label style="grid-auto-flow:column;align-items:center;gap:8px">Airports within
+        <select id="radius" style="width:auto"><option value="0">exact</option><option value="40">40nm</option><option value="75" selected>75nm</option><option value="150">150nm</option></select>
+      </label>
+      <span class="meta faint num" id="meta"></span>
+    </div>
+    <div class="results" id="results">
+      <div class="card empty">Search a city or airport to see empty legs departing nearby. Try <a href="#" data-try="TEB">New York</a>, <a href="#" data-try="VNY">Los Angeles</a>, <a href="#" data-try="PBI">Palm Beach</a> or <a href="#" data-try="GVA">Geneva</a>.</div>
+    </div>
+
+    <section class="how">
+      <div class="card pad"><h3>1. Find a leg</h3><p class="muted">Every listing is a real aircraft already scheduled to fly that route. We search nearby airports and flexible dates, because empty legs don't move.</p></div>
+      <div class="card pad"><h3>2. Request &amp; sign</h3><p class="muted">Your card is authorized, not charged. The certificated operator confirms availability, usually within the hour.</p></div>
+      <div class="card pad"><h3>3. Fly</h3><p class="muted">You're charged on confirmation. If the operator's primary trip changes and the leg cancels, you get a full refund — keep a refundable backup.</p></div>
+    </section>
+
+    <section class="card pad" id="alerts">
+      <h2>Get alerted when a matching leg appears</h2>
+      <p class="muted">Empty legs often sell within hours of listing. Tell us your route; we'll email you the moment one matches.</p>
+      <form class="grid2" id="alert-form" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));align-items:end">
+        <label>Email<input id="a-email" type="email" required></label>
+        <label>From<input id="a-from" placeholder="City or airport" required autocomplete="off"></label>
+        <label>To<input id="a-to" placeholder="Anywhere" autocomplete="off"></label>
+        <label>Passengers<input id="a-pax" type="number" min="1" value="2"></label>
+        <label>Max price (USD)<input id="a-max" type="number" min="0" step="500" placeholder="No limit"></label>
+        <button type="submit">Create alert</button>
+      </form>
+    </section>
+  </main>
+
+  <footer class="wrap">Flights are operated by the FAA Part 135 / EASA AOC certificated carriers shown on each listing, which hold operational control. Demo data.</footer>
+
+  <div class="scrim" id="scrim"></div>
+  <aside class="drawer" id="drawer" aria-modal="true" role="dialog" aria-labelledby="drawer-title">
+    <div class="head"><h2 id="drawer-title" style="margin:0">Flight</h2><button class="secondary small" id="close">Close</button></div>
+    <div class="body" id="drawer-body"></div>
+  </aside>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
