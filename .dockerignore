@@ -1,0 +1,8 @@
+node_modules
+data
+e2e-artifacts
+.git
+test
+scripts
+docs
+*.db*

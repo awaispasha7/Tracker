@@ -7,7 +7,7 @@ below a regular one-way charter.
 ```
 npm install                  # dev tooling only — there are no runtime dependencies
 npm start                    # http://localhost:3000 — demo marketplace + Aviapages in mock mode
-npm test                     # 108 unit/integration tests
+npm test                     # 121 unit/integration tests
 npm run e2e                  # 15 browser end-to-end flows against a fresh server (needs Chromium*)
 npm run typecheck
 
@@ -26,6 +26,11 @@ Requires Node.js ≥ 22.18 (runs TypeScript natively and uses the built-in `node
 | Custom charter quotes | `/charter` | — |
 | Operator portal | `/operator` | `dev_op_skyline`, `dev_op_coastal`, `dev_op_pacific`, `dev_op_alpine`, … |
 | Ops console | `/admin` | `dev_admin_key` (set `ADMIN_KEY` in any real deployment) |
+
+**Going live:** see **[docs/DEPLOY.md](docs/DEPLOY.md)** (Railway, domain, email, Search Console).
+`APP_ENV=production` turns off all demo data and test cards (bookings become request-to-book, paid
+by invoice) and requires a strong `ADMIN_KEY`. Branding and concierge contacts come from
+`BRAND_NAME`, `SITE_URL`, `CONTACT_PHONE`, `CONTACT_WHATSAPP`, `CONTACT_EMAIL`.
 
 Environment: `PORT` (3000), `DB_PATH` (`data/emptylegs.db`), `ADMIN_KEY`, `SIMULATE=0` to turn off the
 demo feed simulator, `SKYACCESS_MODE` (`live` | `mock` | `off`), plus the Aviapages settings in
