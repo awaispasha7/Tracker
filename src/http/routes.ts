@@ -7,12 +7,16 @@ import { searchAirports, getAirport } from '../reference/airports.ts';
 import { AIRCRAFT_TYPES, getAircraftType } from '../reference/aircraft-types.ts';
 import { agreementFor } from '../booking/agreement.ts';
 import { loadSiteConfig, type SiteConfig } from '../site/config.ts';
-import { hubPage, llmsTxt, marketPage, robotsTxt, sitemapXml } from '../site/pages.ts';
+import { hubPage, llmsTxt, marketPage, privacyPage, robotsTxt, sitemapXml, termsPage } from '../site/pages.ts';
 import { isListable } from '../inventory/search.ts';
 import { runContractCheck } from '../integrations/aviapages/contract-check.ts';
 
 export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: string; site?: SiteConfig }): Router {
   const site = opts.site ?? loadSiteConfig({});
+  /** Features that exist only when we sell flights ourselves (not in SkyAccess-only mode). */
+  const ownMarketplace = () => {
+    if (site.marketplace === 'skyaccess') throw new AppError(404, 'not_available', 'This feature is not available');
+  };
   const r = new Router();
   const now = () => app.clock.now();
 
@@ -43,14 +47,16 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     res.writeHead(200, { 'content-type': type, 'cache-control': `public, max-age=${maxAge}`, 'x-content-type-options': 'nosniff' }).end(body);
   };
   r.on('GET', '/empty-legs', ({ res }) => send(res, 'text/html; charset=utf-8', hubPage(app, site)));
-  r.on('GET', '/empty-legs/:slug', ({ params, res }) => {
-    const html = marketPage(app, site, params.slug.toLowerCase());
+  r.on('GET', '/empty-legs/:slug', async ({ params, res }) => {
+    const html = await marketPage(app, site, params.slug.toLowerCase());
     if (!html) {
       res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><title>Not found</title><p>Page not found. <a href="/empty-legs">See all empty-leg routes</a>.</p>`);
       return;
     }
     send(res, 'text/html; charset=utf-8', html);
   });
+  r.on('GET', '/privacy', ({ res }) => send(res, 'text/html; charset=utf-8', privacyPage(site), 3600));
+  r.on('GET', '/terms', ({ res }) => send(res, 'text/html; charset=utf-8', termsPage(site), 3600));
   r.on('GET', '/sitemap.xml', ({ res }) => send(res, 'application/xml; charset=utf-8', sitemapXml(site, now()), 3600));
   r.on('GET', '/robots.txt', ({ res }) => send(res, 'text/plain; charset=utf-8', robotsTxt(site), 3600));
   r.on('GET', '/llms.txt', ({ res }) => send(res, 'text/plain; charset=utf-8', llmsTxt(site), 3600));
@@ -124,6 +130,7 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
 
   // ---------- public: booking ----------
   r.on('POST', '/api/quotes', async ({ body }) => {
+    ownMarketplace();
     const b = body as { legId?: string; pax?: number };
     if (!b?.legId) throw new AppError(400, 'bad_request', 'legId is required');
     const pax = Math.max(1, Math.floor(Number(b.pax ?? 1)));
@@ -132,6 +139,7 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
   });
 
   r.on('POST', '/api/bookings', async ({ body, req, res }) => {
+    ownMarketplace();
     const key = String(req.headers['idempotency-key'] ?? '');
     const input = body as Parameters<App['bookings']['createBooking']>[0];
     const booking = await app.bookings.createBooking(
@@ -152,6 +160,7 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
   r.on('GET', '/api/config', () => ({
     site: { brand: site.brand, tagline: site.tagline, phone: site.phone, whatsapp: site.whatsapp, email: site.email, production: site.production },
     payments: app.payments.kind,
+    marketplace: site.marketplace,
     aviapages: app.aviapages ? { enabled: true, mode: app.aviapages.mode } : { enabled: false, mode: 'off' },
     charterQuotes: app.charters.enabled,
     skyaccess: app.skyaccess ? { enabled: true, mode: app.skyaccess.mode } : { enabled: false, mode: 'off' },
@@ -201,6 +210,7 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
   r.on('GET', '/api/aircraft-types', () => AIRCRAFT_TYPES.filter((t) => t.source !== 'feed').map((t) => ({ code: t.code, name: t.name, category: t.category, seats: t.seats })));
 
   r.on('POST', '/api/operator-applications', ({ body, res }) => {
+    ownMarketplace();
     const out = app.onboarding.apply(body as Parameters<App['onboarding']['apply']>[0], { opsEmail: process.env.OPS_EMAIL ?? site.email });
     res.statusCode = 201;
     return out;
@@ -208,12 +218,14 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
 
   // ---------- public: custom charter requests ----------
   r.on('POST', '/api/charter-requests', async ({ body, res }) => {
+    ownMarketplace();
     const out = await app.charters.create(body as Parameters<App['charters']['create']>[0]);
     res.statusCode = 201;
     return out;
   });
   r.on('GET', '/api/charter-requests/:id', ({ params, query }) => app.charters.view(params.id, query.get('email') ?? ''));
   r.on('POST', '/api/charter-requests/:id/send', ({ params, body }) => {
+    ownMarketplace();
     const b = body as { email?: string; aircraftIds?: number[] };
     return app.charters.send(params.id, String(b?.email ?? ''), Array.isArray(b?.aircraftIds) ? b.aircraftIds.map(Number) : []);
   });
@@ -230,6 +242,7 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
 
   // ---------- public: alerts ----------
   r.on('POST', '/api/alerts', ({ body }) => {
+    ownMarketplace();
     const b = body as { email: string; from: string; to?: string; radiusNm?: number; pax?: number; maxPrice?: number; dateFrom?: string; dateTo?: string };
     return app.alerts.create({ ...b, maxPriceCents: b?.maxPrice ? Math.round(b.maxPrice * 100) : null });
   });

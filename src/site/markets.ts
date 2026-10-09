@@ -14,6 +14,8 @@ export interface City {
   airports: string[];
   /** One sentence, specific to private aviation in this market. */
   blurb: string;
+  /** What to send SkyAccess as origin/destination when the display name isn't a city it knows. */
+  query?: string;
 }
 
 export const CITIES: City[] = [
@@ -24,9 +26,9 @@ export const CITIES: City[] = [
   { slug: 'palm-beach', name: 'Palm Beach', region: 'FL', airports: ['PBI', 'BCT'], blurb: 'Palm Beach International is one of the busiest winter private-jet destinations in the US, with Boca Raton nearby.' },
   { slug: 'las-vegas', name: 'Las Vegas', region: 'NV', airports: ['LAS', 'HND'], blurb: 'Private jets use the FBOs at Harry Reid International and Henderson Executive, a few minutes from the Strip.' },
   { slug: 'aspen', name: 'Aspen', region: 'CO', airports: ['ASE'], blurb: 'Aspen/Pitkin County sits at 7,800 ft between mountains; aircraft and crews need mountain experience, and winter weekends book out early.' },
-  { slug: 'the-hamptons', name: 'The Hamptons', region: 'NY', airports: ['HTO', 'FOK'], blurb: 'East Hampton and Gabreski (Westhampton Beach) turn a three-hour summer drive from Manhattan into a 35-minute flight.' },
+  { slug: 'the-hamptons', query: 'HTO', name: 'The Hamptons', region: 'NY', airports: ['HTO', 'FOK'], blurb: 'East Hampton and Gabreski (Westhampton Beach) turn a three-hour summer drive from Manhattan into a 35-minute flight.' },
   { slug: 'boston', name: 'Boston', region: 'MA', airports: ['BED', 'BOS'], blurb: 'Hanscom Field in Bedford is Boston’s main private-jet airport, with Logan for larger aircraft.' },
-  { slug: 'washington-dc', name: 'Washington, D.C.', region: 'DC', airports: ['IAD', 'DCA'], blurb: 'Dulles handles most private traffic for the capital; Reagan National allows private flights under extra security rules.' },
+  { slug: 'washington-dc', query: 'Washington', name: 'Washington, D.C.', region: 'DC', airports: ['IAD', 'DCA'], blurb: 'Dulles handles most private traffic for the capital; Reagan National allows private flights under extra security rules.' },
   { slug: 'chicago', name: 'Chicago', region: 'IL', airports: ['PWK', 'MDW', 'ORD'], blurb: 'Chicago Executive and Midway are the private-jet airports closest to downtown and the North Shore.' },
   { slug: 'dallas', name: 'Dallas', region: 'TX', airports: ['DAL', 'ADS', 'DFW'], blurb: 'Dallas Love Field and Addison are minutes from Uptown and Preston Hollow, with DFW for larger aircraft.' },
   { slug: 'houston', name: 'Houston', region: 'TX', airports: ['HOU', 'IAH'], blurb: 'Hobby is the closest private-jet airport to downtown Houston and the Galleria; Bush Intercontinental serves the north.' },
@@ -40,11 +42,11 @@ export const CITIES: City[] = [
   { slug: 'orlando', name: 'Orlando', region: 'FL', airports: ['ORL', 'MCO'], blurb: 'Orlando Executive is the closest private-jet airport to downtown; Orlando International serves the theme-park corridor.' },
   { slug: 'naples', name: 'Naples', region: 'FL', airports: ['APF'], blurb: 'Naples Municipal is a busy winter private-jet destination on Florida’s Gulf Coast.' },
   { slug: 'nantucket', name: 'Nantucket', region: 'MA', airports: ['ACK'], blurb: 'Nantucket Memorial is one of the busiest summer private-jet airports in New England.' },
-  { slug: 'marthas-vineyard', name: 'Martha’s Vineyard', region: 'MA', airports: ['MVY'], blurb: 'Martha’s Vineyard sees heavy private traffic from New York and Washington all summer.' },
+  { slug: 'marthas-vineyard', query: 'MVY', name: 'Martha’s Vineyard', region: 'MA', airports: ['MVY'], blurb: 'Martha’s Vineyard sees heavy private traffic from New York and Washington all summer.' },
   { slug: 'vail', name: 'Vail', region: 'CO', airports: ['EGE'], blurb: 'Eagle County Regional is 30 minutes from Vail and Beaver Creek.' },
   { slug: 'jackson-hole', name: 'Jackson Hole', region: 'WY', airports: ['JAC'], blurb: 'Jackson Hole Airport, inside Grand Teton National Park, serves the ski resort and summer ranches.' },
-  { slug: 'napa-valley', name: 'Napa Valley', region: 'CA', airports: ['APC', 'STS'], blurb: 'Napa County and Sonoma County airports put wine country minutes from landing.' },
-  { slug: 'lake-tahoe', name: 'Lake Tahoe', region: 'CA', airports: ['TRK', 'RNO'], blurb: 'Truckee-Tahoe is the private-jet airport for North Lake Tahoe; Reno-Tahoe takes larger aircraft.' },
+  { slug: 'napa-valley', query: 'APC', name: 'Napa Valley', region: 'CA', airports: ['APC', 'STS'], blurb: 'Napa County and Sonoma County airports put wine country minutes from landing.' },
+  { slug: 'lake-tahoe', query: 'TRK', name: 'Lake Tahoe', region: 'CA', airports: ['TRK', 'RNO'], blurb: 'Truckee-Tahoe is the private-jet airport for North Lake Tahoe; Reno-Tahoe takes larger aircraft.' },
   { slug: 'palm-springs', name: 'Palm Springs', region: 'CA', airports: ['PSP', 'TRM'], blurb: 'Palm Springs International and Thermal (TRM) serve the Coachella Valley, busiest around festival season.' },
   { slug: 'los-cabos', name: 'Los Cabos', region: 'Mexico', airports: ['SJD'], blurb: 'Los Cabos is the most popular international private-jet destination from the West Coast.' },
   { slug: 'nassau', name: 'Nassau', region: 'Bahamas', airports: ['NAS'], blurb: 'Nassau is under an hour from South Florida by private jet.' },

@@ -35,13 +35,21 @@ CONTACT_EMAIL=concierge@yourdomain.com
 OPS_EMAIL=you@yourdomain.com
 ```
 
+The site starts in **SkyAccess-only mode** (`MARKETPLACE=skyaccess`, the production default):
+travelers see SkyAccess flights and book on SkyAccess; your own booking flow, operator sign-up,
+route alerts and custom charter are switched off and their pages redirect home. Set
+`MARKETPLACE=full` only once you have operators signed and your lawyer has reviewed the charter
+agreement and DOT broker obligations.
+
 Optional, add when ready:
 
 | Variable | What it does |
 | --- | --- |
 | `SITE_URL` | Your domain, e.g. `https://aurumjets.com`. Until set, the Railway domain is used. Set it as soon as your domain works: it goes into canonical tags and the sitemap. |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Real email (step 5). Without them, emails are only written to the logs. |
-| `SKYACCESS_MODE` | `live` (default) shows SkyAccess partner flights; `off` hides them. |
+| `SKYACCESS_REF` | Your SkyAccess affiliate tracking, exactly as SkyAccess gives it, e.g. `ref=abc123`. Added to every SkyAccess link so your bookings are credited (see "Getting paid" below). |
+| `GOVERNING_LAW` | e.g. `the State of New York`. Adds a governing-law section to the terms. Ask your lawyer. |
+| `SKYACCESS_MODE` | `live` (default) shows SkyAccess flights; `off` hides them. |
 | `AVIAPAGES_API_KEY` | Live Aviapages inventory, if you subscribe. |
 | `PAYMENTS` | `invoice` (default in production): request to book, pay by invoice. |
 
@@ -73,23 +81,43 @@ for hobby projects. For a luxury brand, a real `.com` is worth about $10 a year:
 Travelers then get booking emails, operators get requests (with a copy to `OPS_EMAIL`), and new
 operator applications reach you.
 
-## 6. First day
+## 6. Getting paid by SkyAccess
 
-1. Open `https://<your-site>/admin`, sign in with `ADMIN_KEY`. The **Operators** tab is your
-   home: applications appear there.
-2. Send operators to `https://<your-site>/operator/apply`. Verify each certificate on the FAA's
-   list of Part 135 certificate holders, then **Approve**. They get their portal key by email and
-   can post legs straight away.
-3. Bookings arrive as requests. When an operator confirms, send the traveler your invoice or
-   payment link (the confirmation email tells them one is coming).
+The public MCP server works without an account, but **it can't credit you**: its booking links
+carry no partner ID. To earn on bookings:
 
-## 7. Get found (SEO / AEO)
+1. Go to [skyaccess.com/partners](https://skyaccess.com/partners) and choose **Affiliate**
+   (SkyAccess keeps booking, payment and liability; you earn a commission on each flight you
+   send them).
+2. Once approved, ask SkyAccess how referrals are tracked: a URL parameter on booking links, a
+   partner ID for API/MCP calls, or both. Also ask how "Ask SkyAccess" enquiries are credited.
+   Every enquiry we send already ends with "Sent via <your brand>" in its notes.
+3. Put the link parameter in `SKYACCESS_REF` and redeploy. If they give you an API key or partner
+   ID for the MCP or API instead, send it over and the client can be updated to pass it.
+
+## 7. Legal pages
+
+`/privacy` and `/terms` are drafts written to match what the site actually does: SkyAccess-only
+referral, the data each form sends, and a commission disclosure. **Have a lawyer review them**
+before launch, and set `CONTACT_EMAIL` so they show a real contact address.
+
+## 8. First day
+
+1. Open `https://<your-site>/`, search a city such as `TEB` or `VNY`, and open a flight: the
+   **Book on SkyAccess** link should carry your `SKYACCESS_REF`.
+2. Open `https://<your-site>/admin` with `ADMIN_KEY` to see the enquiries sent to SkyAccess
+   (`/api/admin/skyaccess`).
+3. Later, in `MARKETPLACE=full`: the **Operators** tab is where operator applications appear.
+   Verify each certificate on the FAA's list of Part 135 holders before approving.
+
+## 9. Get found (SEO / AEO)
 
 1. [Google Search Console](https://search.google.com/search-console): add your domain, verify via
    DNS, then **Sitemaps → submit** `sitemap.xml`.
 2. [Bing Webmaster Tools](https://www.bing.com/webmasters): import from Google Search Console.
    Bing's index also feeds several AI assistants.
-3. Already done in the code: 140+ city and route pages, structured data, `robots.txt` that
+3. Already done in the code: 140+ city and route pages (live SkyAccess flights on each, cached for 15
+   minutes so crawlers can't use up SkyAccess's rate limit), structured data, `robots.txt` that
    welcomes AI crawlers, and `/llms.txt` describing the site for AI assistants.
 
 ## Updating

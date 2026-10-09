@@ -42,6 +42,8 @@ export interface SkyAccessOptions {
   /** 'live' calls the public SkyAccess MCP server (no key needed); 'mock' uses the in-process mock; 'off' disables it. */
   mode: 'live' | 'mock' | 'off';
   config?: Partial<SkyAccessConfig>;
+  /** Affiliate tracking params for SkyAccess links, and our brand for enquiry notes. */
+  referral?: { params?: string | null; source?: string | null };
   mock?: SkyAccessMock;
   fetch?: FetchLike;
 }
@@ -121,5 +123,5 @@ function createSkyAccess(opts: SkyAccessOptions | undefined, deps: { db: Databas
   const mock = mode === 'mock' ? opts?.mock ?? new SkyAccessMock({ now: deps.clock.now }) : null;
   const fetchImpl: FetchLike = opts?.fetch ?? (mock ? mock.fetch : (globalThis.fetch as unknown as FetchLike));
   const client = new SkyAccessClient({ config: opts?.config, fetch: fetchImpl, now: deps.clock.now });
-  return new SkyAccessService({ client, db: deps.db, clock: deps.clock, mode });
+  return new SkyAccessService({ client, db: deps.db, clock: deps.clock, mode, referral: opts?.referral });
 }

@@ -12,6 +12,13 @@ export interface SiteConfig {
   email: string | null;
   /** 'card' (test cards in dev) or 'invoice' (request to book, pay by invoice). */
   payments: 'card' | 'invoice';
+  /**
+   * 'skyaccess': referral site. Travelers see SkyAccess flights and book on SkyAccess; our own
+   * booking flow, operator sign-up, alerts and custom charter are off. 'full': everything.
+   */
+  marketplace: 'skyaccess' | 'full';
+  /** Affiliate tracking from SkyAccess, appended to every SkyAccess link, e.g. "ref=abc123". */
+  skyaccessRef: string | null;
 }
 
 export function loadSiteConfig(env: NodeJS.ProcessEnv = process.env): SiteConfig {
@@ -27,5 +34,7 @@ export function loadSiteConfig(env: NodeJS.ProcessEnv = process.env): SiteConfig
     whatsapp: env.CONTACT_WHATSAPP?.replace(/\D/g, '') || null,
     email: env.CONTACT_EMAIL?.trim() || null,
     payments: (env.PAYMENTS as SiteConfig['payments']) ?? (production ? 'invoice' : 'card'),
+    marketplace: (env.MARKETPLACE as SiteConfig['marketplace']) ?? (production ? 'skyaccess' : 'full'),
+    skyaccessRef: env.SKYACCESS_REF?.trim().replace(/^[?&]/, '') || null,
   };
 }

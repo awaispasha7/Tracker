@@ -97,7 +97,11 @@ export class SkyAccessService {
   private clock: Clock;
   private searchCache = new Map<string, { at: number; flights: PartnerFlight[]; text: string }>();
 
-  constructor(deps: { client: SkyAccessClient; db: Database; clock: Clock; mode: 'live' | 'mock' }) {
+  /** Affiliate tracking (e.g. "ref=abc") added to SkyAccess links, and our name for enquiry notes. */
+  private referral: { params: string | null; source: string | null };
+
+  constructor(deps: { client: SkyAccessClient; db: Database; clock: Clock; mode: 'live' | 'mock'; referral?: { params?: string | null; source?: string | null } }) {
+    this.referral = { params: deps.referral?.params ?? null, source: deps.referral?.source ?? null };
     this.client = deps.client;
     this.db = deps.db;
     this.clock = deps.clock;
@@ -115,7 +119,8 @@ export class SkyAccessService {
     const hit = this.searchCache.get(key);
     if (hit && now - hit.at < SEARCH_TTL_MS) return { flights: hit.flights, text: hit.text };
     const r = await this.call(() => this.client.callTool('search_empty_legs', args));
-    const flights = listOf(r.data).map(normalizeFlight).filter((f): f is PartnerFlight => !!f);
+    const flights = listOf(r.data).map(normalizeFlight).filter((f): f is PartnerFlight => !!f)
+      .map((f) => ({ ...f, bookingUrl: this.tagUrl(f.bookingUrl) }));
     if (this.searchCache.size > 200) this.searchCache.clear();
     this.searchCache.set(key, { at: now, flights, text: r.text });
     return { flights, text: r.text };
@@ -129,7 +134,7 @@ export class SkyAccessService {
       const rec = listOf(r.data)[0] ?? (isObj(r.data) ? r.data : null);
       const f = rec ? normalizeFlight(isObj(rec) && isObj(rec.flight) ? rec.flight : rec) : null;
       if (f) {
-        if (!f.bookingUrl) f.bookingUrl = await this.bookingLink(flightId).catch(() => null);
+        f.bookingUrl = f.bookingUrl ? this.tagUrl(f.bookingUrl) : await this.bookingLink(flightId).catch(() => null);
         return f;
       }
       return null;
@@ -143,7 +148,20 @@ export class SkyAccessService {
   async bookingLink(flightId: string): Promise<string | null> {
     const r = await this.call(() => this.client.callTool('booking_handoff', { flightId }));
     const d = isObj(r.data) ? r.data : {};
-    return safeUrl(pickStr(d, 'bookingUrl', 'booking_url', 'url', 'link', 'bookingLink')) ?? safeUrl(r.text.match(/https:\/\/\S+/)?.[0]?.replace(/[).,]+$/, '') ?? null);
+    return this.tagUrl(safeUrl(pickStr(d, 'bookingUrl', 'booking_url', 'url', 'link', 'bookingLink')) ?? safeUrl(r.text.match(/https:\/\/\S+/)?.[0]?.replace(/[).,]+$/, '') ?? null));
+  }
+
+  /** Adds our affiliate tracking to links on skyaccess.com so referrals are credited to us. */
+  tagUrl(u: string | null): string | null {
+    if (!u || !this.referral.params) return u;
+    try {
+      const url = new URL(u);
+      if (!/(^|\.)skyaccess\.com$/.test(url.hostname)) return u;
+      for (const [k, v] of new URLSearchParams(this.referral.params)) url.searchParams.set(k, v);
+      return url.toString();
+    } catch {
+      return u;
+    }
   }
 
   /** Indicative full-charter price ranges per aircraft category (not a quote). */
@@ -164,6 +182,7 @@ export class SkyAccessService {
    */
   async requestBooking(input: BookingRequestInput): Promise<BookingRequestView> {
     const b = validateBooking(input, this.clock.now());
+    if (this.referral.source) b.notes = [b.notes, `Sent via ${this.referral.source}`].filter(Boolean).join('\n');
     const schema = await this.client.tool('request_booking').catch(() => undefined);
     const args = mapToSchema(b, schema);
     const id = newId('sar');

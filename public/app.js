@@ -20,8 +20,9 @@ $('#cats').addEventListener('click', (e) => {
 
 const from = airportPicker($('#from'));
 const to = airportPicker($('#to'));
-const aFrom = airportPicker($('#a-from'));
-const aTo = airportPicker($('#a-to'));
+// Route alerts exist only in the full marketplace; the server leaves the form out otherwise.
+const aFrom = $('#a-from') ? airportPicker($('#a-from')) : null;
+const aTo = $('#a-to') ? airportPicker($('#a-to')) : null;
 
 let lastQuery = null;
 
@@ -39,6 +40,7 @@ async function runSearch({ quiet = false } = {}) {
   lastQuery = q;
   if (!quiet) $('#results').innerHTML = '<div class="card empty">Searching live inventory…</div>';
   try {
+    if ((await config).marketplace === 'skyaccess') return searchPartners(q, { primary: true, quiet });
     if (!quiet) searchPartners(q);
     const r = await api(`/api/search?${q}`);
     if (lastQuery !== q) return;
@@ -98,10 +100,14 @@ document.addEventListener('click', (e) => {
 $('#results').addEventListener('click', (e) => {
   const card = e.target.closest('[data-leg]');
   if (card) location.hash = `leg=${card.dataset.leg}`;
+  const sky = e.target.closest('[data-sky]');
+  if (sky) location.hash = `sky=${sky.dataset.sky}`;
 });
 $('#results').addEventListener('keydown', (e) => {
   const card = e.target.closest('[data-leg]');
   if (card && e.key === 'Enter') location.hash = `leg=${card.dataset.leg}`;
+  const sky = e.target.closest('[data-sky]');
+  if (sky && e.key === 'Enter') location.hash = `sky=${sky.dataset.sky}`;
 });
 
 // ---------- SkyAccess partner flights: shown beside ours, booked on SkyAccess ----------
@@ -110,22 +116,8 @@ const partnerFlights = new Map();
 const usd = (n) => (n == null ? 'Contact for price' : money(n * 100));
 const placeText = (p) => p.code || p.city || p.name || '—';
 
-async function searchPartners(q) {
-  const box = $('#partners');
-  if (!(await config).skyaccess?.enabled) return;
-  const pq = new URLSearchParams({ from: q.get('from'), pax: q.get('pax') ?? '1', flex: q.get('flex') ?? '0' });
-  if (q.get('to')) pq.set('to', q.get('to'));
-  if (q.get('date')) pq.set('date', q.get('date'));
-  box.hidden = false;
-  box.innerHTML = '<h2>More from SkyAccess</h2><div class="card empty">Checking SkyAccess partner flights…</div>';
-  try {
-    const { flights } = await api(`/api/partners/skyaccess/search?${pq}`);
-    if (lastQuery !== q) return;
-    flights.forEach((f) => partnerFlights.set(f.flightId, f));
-    if (!flights.length) { box.hidden = true; return; }
-    box.innerHTML = `<h2>More from SkyAccess</h2>
-      <p class="faint">Partner empty legs. Booked and paid on SkyAccess; taxes and fees are added at their checkout.</p>
-      <div class="results">${flights.map((f) => `
+function partnerCards(flights) {
+  return flights.map((f) => `
         <article class="card leg" data-sky="${esc(f.flightId)}" tabindex="0">
           <div>
             <div class="route">
@@ -143,12 +135,52 @@ async function searchPartners(q) {
             <div class="total num">${esc(usd(f.priceUsd))}</div>
             <div class="faint">whole aircraft${f.priceUsd == null ? '' : ' · plus taxes &amp; fees'}</div>
           </div>
-        </article>`).join('')}</div>`;
+        </article>`).join('');
+}
+
+/** SkyAccess flights: beside ours ("More from SkyAccess"), or as the main results in SkyAccess-only mode. */
+async function searchPartners(q, { primary = false, quiet = false } = {}) {
+  const box = primary ? $('#results') : $('#partners');
+  if (!(await config).skyaccess?.enabled) {
+    if (primary) box.innerHTML = '<div class="card empty">Flight search is temporarily unavailable. Please contact our concierge.</div>';
+    return;
+  }
+  const pq = new URLSearchParams({ from: q.get('from'), pax: q.get('pax') ?? '1', flex: q.get('flex') ?? '0' });
+  if (q.get('to')) pq.set('to', q.get('to'));
+  if (q.get('date')) pq.set('date', q.get('date'));
+  const head = primary ? '' : '<h2>More from SkyAccess</h2>';
+  box.hidden = false;
+  if (!quiet) box.innerHTML = `${head}<div class="card empty">${primary ? 'Searching live empty legs…' : 'Checking SkyAccess partner flights…'}</div>`;
+  try {
+    const { flights } = await api(`/api/partners/skyaccess/search?${pq}`);
+    if (lastQuery !== q) return;
+    flights.forEach((f) => partnerFlights.set(f.flightId, f));
+    if (primary) {
+      $('#count').textContent = flights.length ? `${flights.length} empty leg${flights.length === 1 ? '' : 's'}` : '';
+      $('#meta').textContent = '';
+      box.innerHTML = flights.length
+        ? `${partnerCards(flights)}<p class="faint">Listed by our partner SkyAccess. You book on SkyAccess; taxes and fees are added at their checkout.</p>`
+        : '<div class="card empty">No empty legs match right now. Try other dates or a nearby city: new flights are listed every day.</div>';
+      return;
+    }
+    if (!flights.length) { box.hidden = true; return; }
+    box.innerHTML = `<h2>More from SkyAccess</h2>
+      <p class="faint">Partner empty legs. Booked and paid on SkyAccess; taxes and fees are added at their checkout.</p>
+      <div class="results">${partnerCards(flights)}</div>`;
   } catch (e) {
     if (lastQuery !== q) return;
-    box.innerHTML = `<h2>More from SkyAccess</h2><div class="card empty">${esc(e.code === 'partner_rate_limited' ? 'SkyAccess is busy — search again in a minute.' : 'SkyAccess partner flights are unavailable right now.')}</div>`;
+    const msg = e.code === 'partner_rate_limited' ? 'Busy right now — please search again in a minute.' : primary ? 'Flight search is temporarily unavailable. Please try again shortly.' : 'SkyAccess partner flights are unavailable right now.';
+    box.innerHTML = `${head}<div class="card empty">${esc(msg)}</div>`;
   }
 }
+
+// SkyAccess-only mode: hide controls SkyAccess search doesn't support.
+config.then((c) => {
+  if (c.marketplace !== 'skyaccess') return;
+  $('#cats').hidden = true;
+  $('#sort').closest('label').hidden = true;
+  $('#radius').closest('label').hidden = true;
+});
 
 // ---------- concierge contact, from server config ----------
 config.then(({ site }) => {
@@ -189,6 +221,7 @@ $('#partners').addEventListener('keydown', (e) => {
 
 // ---------- live inventory ----------
 function connectLive() {
+  if (!$('#live')) return;
   const es = new EventSource('/api/stream');
   es.onopen = () => { $('#live').classList.remove('off'); $('#live').textContent = 'Live inventory'; };
   es.onerror = () => { $('#live').classList.add('off'); $('#live').textContent = 'reconnecting…'; };
@@ -486,7 +519,7 @@ window.addEventListener('hashchange', route);
 route();
 
 // ---------- alerts ----------
-$('#alert-form').addEventListener('submit', async (e) => {
+$('#alert-form')?.addEventListener('submit', async (e) => {
   e.preventDefault();
   try {
     const r = await api('/api/alerts', {

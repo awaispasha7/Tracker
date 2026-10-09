@@ -12,7 +12,7 @@ import { randomBytes } from 'node:crypto';
 import { loadSiteConfig } from './site/config.ts';
 import { InvoicePaymentProvider, MockPaymentProvider } from './booking/payments.ts';
 import { resendSender } from './alerts/email.ts';
-import { organizationLd } from './site/pages.ts';
+import { disclaimer, organizationLd } from './site/pages.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const SITE = loadSiteConfig();
@@ -36,6 +36,7 @@ const mock = AVP_MODE === 'mock'
   : undefined;
 // ---------- SkyAccess: public MCP server, no key needed. SKYACCESS_MODE=mock for offline demos, off to hide. ----------
 const SKY_MODE = (process.env.SKYACCESS_MODE ?? 'live') as 'live' | 'mock' | 'off';
+if (SITE.marketplace === 'skyaccess' && SKY_MODE === 'off') console.warn('[site] MARKETPLACE=skyaccess but SKYACCESS_MODE=off: the site will have no flights to show.');
 const minutes = (name: string, fallback: number) => (process.env[name] ? Number(process.env[name]) * MINUTE : fallback);
 
 const app = createApp({
@@ -55,7 +56,11 @@ const app = createApp({
       listingMaxAgeMs: minutes('AVIAPAGES_LISTING_MAX_AGE_MINUTES', 12 * HOUR),
     },
   },
-  skyaccess: { mode: SKY_MODE, config: process.env.SKYACCESS_ENDPOINT ? { endpoint: process.env.SKYACCESS_ENDPOINT } : undefined },
+  skyaccess: {
+    mode: SKY_MODE,
+    config: process.env.SKYACCESS_ENDPOINT ? { endpoint: process.env.SKYACCESS_ENDPOINT } : undefined,
+    referral: { params: SITE.skyaccessRef, source: SITE.brand },
+  },
   comms: {
     pollEveryMs: minutes('AVIAPAGES_POLL_MINUTES', mock ? 1 * MINUTE : 3 * MINUTE),
     replyToAddress: process.env.REPLY_TO_ADDRESS ?? 'ops@emptylegtracker.example',
@@ -98,7 +103,10 @@ function mockPhoto(path: string): string {
 
 /** Static pages carry the brand name and, on the home page, canonical/OG tags and structured data. */
 function brandHtml(html: string, path: string): string {
-  let out = html.replaceAll('Empty Leg Tracker', SITE.brand);
+  let out = html
+    .replace(/<!--MODE:(\w+)-->([\s\S]*?)<!--\/MODE-->/g, (_, mode: string, inner: string) => (mode === SITE.marketplace ? inner : ''))
+    .replace('<!--DISCLAIMER-->', disclaimer(SITE))
+    .replaceAll('Empty Leg Tracker', SITE.brand);
   if (path === '/') {
     const seo = [
       `<link rel="canonical" href="${SITE.url}/">`,
@@ -118,6 +126,10 @@ const server = createServer(async (req, res) => {
     return;
   }
   const path = new URL(req.url ?? '/', 'http://localhost').pathname;
+  if (SITE.marketplace === 'skyaccess' && ['/charter', '/charter.html', '/operator', '/operator.html', '/operator/apply', '/operator-apply.html'].includes(path)) {
+    res.writeHead(302, { location: '/' }).end();
+    return;
+  }
   if (mock && path.startsWith('/mock-aviapages/media/')) {
     res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'max-age=86400' }).end(mockPhoto(path));
     return;
@@ -175,6 +187,7 @@ const stopSim = SIMULATE ? startSimulator(app, seeded.specs, 20_000) : () => {};
 
 server.listen(PORT, () => {
   console.log(`\n${SITE.brand} on http://localhost:${PORT}  (${PROD ? 'PRODUCTION' : 'development'}, public URL ${SITE.url})`);
+  console.log(`  marketplace      ${SITE.marketplace === 'skyaccess' ? 'SkyAccess referral (own booking, operators, alerts off)' : 'full'}${SITE.skyaccessRef ? ' · affiliate tracking on' : ''}`);
   console.log(`  payments         ${SITE.payments === 'invoice' ? 'request to book, pay by invoice' : 'test cards'}`);
   console.log(`  traveler site    http://localhost:${PORT}/`);
   console.log(`  custom charter   http://localhost:${PORT}/charter`);

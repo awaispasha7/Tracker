@@ -259,3 +259,6 @@ ul.plain { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
   header.top nav.links a:not(.keep):not(#logout) { display: none; }
   .masthead { padding: 36px 0 84px; }
 }
+.legal { max-width: 760px; }
+.legal h2 { font-size: 1.35rem; margin-top: 1.6em; }
+.legal li { margin: 6px 0; }
