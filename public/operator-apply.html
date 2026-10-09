@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>List your empty legs · Operators</title>
+  <meta name="description" content="Certificated charter operators: list your empty legs free and reach travelers ready to book the whole aircraft. You set your net price; we handle the rest.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M2 14.5 22 6l-6.5 14-3-6.5L2 14.5Z%27 fill=%27%231d4e89%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="/" id="brand">Empty Leg Tracker</a>
+      <span class="faint">For operators</span>
+      <nav class="links"><a href="/">Traveler site</a><a href="/operator">Operator sign in</a></nav>
+    </div>
+  </header>
+  <main class="wrap" style="max-width:880px">
+    <section class="hero">
+      <h1>Sell your empty legs to travelers ready to book.</h1>
+      <p class="muted">Free to list. You set your net price and keep all of it; travelers see one all-in price with our fee added on top. You confirm every booking yourself, and you keep operational control.</p>
+    </section>
+
+    <div class="how" style="grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin:0 0 24px">
+      <div class="card pad"><h3>1. Apply</h3><p class="muted">Tell us your certificate and fleet. We verify every operator before anything goes live, usually within a business day.</p></div>
+      <div class="card pad"><h3>2. Post legs</h3><p class="muted">One at a time, as a spreadsheet, or automatically from your scheduling system through our feed API.</p></div>
+      <div class="card pad"><h3>3. Confirm &amp; fly</h3><p class="muted">You get each request with the traveler's details and your payout. Confirm or decline in the portal.</p></div>
+    </div>
+
+    <form class="card pad stack" id="apply" novalidate>
+      <h2 style="margin:0">Company</h2>
+      <div class="grid2">
+        <label>Company name<input name="company" required autocomplete="organization"></label>
+        <label>Website<input name="website" type="url" placeholder="https://"></label>
+        <label>Certificate
+          <select name="certificate" required>
+            <option>FAA Part 135</option><option>EASA AOC</option><option>Other AOC</option>
+          </select>
+        </label>
+        <label>Certificate number<input name="certificateNumber" required placeholder="e.g. 8XYA123B"></label>
+      </div>
+      <h2 style="margin:8px 0 0">Contact</h2>
+      <div class="grid2">
+        <label>Your name<input name="contactName" required autocomplete="name"></label>
+        <label>Email<input name="email" type="email" required autocomplete="email"></label>
+        <label>Phone<input name="phone" type="tel" required autocomplete="tel"></label>
+      </div>
+      <h2 style="margin:8px 0 0">Fleet</h2>
+      <p class="faint" style="margin:0">Aircraft on your certificate that will fly empty legs. You can add more later.</p>
+      <div id="fleet" class="stack"></div>
+      <button type="button" class="secondary" id="add-aircraft" style="justify-self:start">+ Add aircraft</button>
+      <label>Anything else we should know? (optional)<textarea name="notes" rows="3" maxlength="2000"></textarea></label>
+      <label class="hp" aria-hidden="true">Company URL<input name="company_url" tabindex="-1" autocomplete="off"></label>
+      <label class="check"><input type="checkbox" required id="attest"> I confirm we hold the certificate above and operate the listed aircraft under it.</label>
+      <button type="submit">Submit application</button>
+      <div id="out"></div>
+    </form>
+    <datalist id="types"></datalist>
+  </main>
+  <footer class="wrap">Questions? Reply to any email from us, or use the contact details on the main site.</footer>
+  <script type="module" src="/operator-apply.js"></script>
+</body>
+</html>

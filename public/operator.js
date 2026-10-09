@@ -160,3 +160,5 @@ $('#threads').addEventListener('click', (e) => {
 });
 
 if (key) signIn(key).catch(() => sessionStorage.removeItem('opKey'));
+
+api('/api/config').then((c) => { if (!c.site?.production) document.querySelector('#demo-keys').hidden = false; }).catch(() => {});

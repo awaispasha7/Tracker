@@ -18,8 +18,10 @@
   <main class="wrap">
     <section id="login" class="card pad" style="max-width:460px;margin:48px auto">
       <h2>Sign in</h2>
-      <p class="muted">Use your operator API key. In the demo, try <code>dev_op_skyline</code>, <code>dev_op_coastal</code>, <code>dev_op_pacific</code> or <code>dev_op_alpine</code>.</p>
-      <form class="stack" id="login-form"><label>API key<input id="key" required autocomplete="off"></label><button>Sign in</button></form>
+      <p class="muted">Use the portal key we emailed when your company was approved.</p>
+      <p class="muted" id="demo-keys" hidden>Demo: try <code>dev_op_skyline</code>, <code>dev_op_coastal</code>, <code>dev_op_pacific</code> or <code>dev_op_alpine</code>.</p>
+      <form class="stack" id="login-form"><label>Portal key<input id="key" required autocomplete="off"></label><button>Sign in</button></form>
+      <p class="muted" style="margin-bottom:0">New operator? <a href="/operator/apply">Apply to list your empty legs</a>. Free to list; we only earn when a flight books.</p>
     </section>
 
     <section id="portal" hidden>

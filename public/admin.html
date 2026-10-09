@@ -18,11 +18,12 @@
   <main class="wrap">
     <section id="login" class="card pad" style="max-width:460px;margin:48px auto">
       <h2>Ops sign in</h2>
-      <form class="stack" id="login-form"><label>Admin key<input id="key" required autocomplete="off" placeholder="dev_admin_key"></label><button>Sign in</button></form>
+      <form class="stack" id="login-form"><label>Admin key<input id="key" required autocomplete="off"></label><button>Sign in</button></form>
     </section>
     <section id="ops" hidden>
       <div class="tabs" role="tablist">
-        <button role="tab" data-tab="integrations" aria-selected="true">Integrations</button>
+        <button role="tab" data-tab="operators" aria-selected="true">Operators <span id="apps" class="tag warn" hidden></span></button>
+        <button role="tab" data-tab="integrations" aria-selected="false">Integrations</button>
         <button role="tab" data-tab="inbox" aria-selected="false">Inbox <span id="attn" class="tag warn" hidden></span></button>
         <button role="tab" data-tab="bookings" aria-selected="false">Bookings</button>
         <button role="tab" data-tab="charters" aria-selected="false">Charter requests</button>

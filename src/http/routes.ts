@@ -4,7 +4,7 @@ import type { App } from '../app.ts';
 import { Router, type Ctx } from './router.ts';
 import { AppError, CATEGORIES, DAY, type AircraftCategory, type Leg, type Operator } from '../domain/types.ts';
 import { searchAirports, getAirport } from '../reference/airports.ts';
-import { getAircraftType } from '../reference/aircraft-types.ts';
+import { AIRCRAFT_TYPES, getAircraftType } from '../reference/aircraft-types.ts';
 import { agreementFor } from '../booking/agreement.ts';
 import { loadSiteConfig, type SiteConfig } from '../site/config.ts';
 import { isListable } from '../inventory/search.ts';
@@ -179,6 +179,15 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     return out;
   });
 
+  // ---------- public: operator applications ----------
+  r.on('GET', '/api/aircraft-types', () => AIRCRAFT_TYPES.filter((t) => t.source !== 'feed').map((t) => ({ code: t.code, name: t.name, category: t.category, seats: t.seats })));
+
+  r.on('POST', '/api/operator-applications', ({ body, res }) => {
+    const out = app.onboarding.apply(body as Parameters<App['onboarding']['apply']>[0], { opsEmail: process.env.OPS_EMAIL ?? site.email });
+    res.statusCode = 201;
+    return out;
+  });
+
   // ---------- public: custom charter requests ----------
   r.on('POST', '/api/charter-requests', async ({ body, res }) => {
     const out = await app.charters.create(body as Parameters<App['charters']['create']>[0]);
@@ -338,6 +347,34 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     requireAdmin(ctx);
     return app.legs.recentIngestErrors(100);
   });
+  r.on('GET', '/api/admin/operator-applications', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.list(ctx.query.get('status') || undefined);
+  });
+  r.on('POST', '/api/admin/operator-applications/:id/approve', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.approve(ctx.params.id, { note: String((ctx.body as { note?: string })?.note ?? '') || undefined });
+  });
+  r.on('POST', '/api/admin/operator-applications/:id/reject', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.reject(ctx.params.id, String((ctx.body as { reason?: string })?.reason ?? ''));
+  });
+  r.on('GET', '/api/admin/operators', (ctx) => {
+    requireAdmin(ctx);
+    return app.fleet.listOperators().map((o) => ({ id: o.id, name: o.name, certificate: o.certificate, status: o.status, source: o.source, contact: o.contact }));
+  });
+  r.on('POST', '/api/admin/operators/:id/status', async (ctx) => {
+    requireAdmin(ctx);
+    const op = app.fleet.getOperator(ctx.params.id);
+    if (!op) throw new AppError(404, 'not_found', 'Operator not found');
+    const status = (ctx.body as { status?: string })?.status;
+    if (status !== 'active' && status !== 'suspended') throw new AppError(400, 'bad_status', 'status must be active or suspended');
+    app.fleet.upsertOperator({ ...op, status });
+    await app.ingest.refresh();
+    app.search.invalidate();
+    return { id: op.id, status };
+  });
+
   r.on('GET', '/api/admin/skyaccess', async (ctx) => {
     requireAdmin(ctx);
     if (!app.skyaccess) return { enabled: false, mode: 'off' };

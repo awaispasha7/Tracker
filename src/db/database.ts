@@ -294,6 +294,26 @@ CREATE TABLE IF NOT EXISTS skyaccess_requests (
   created_at INTEGER NOT NULL
 );
 
+-- Operators applying to list legs; approved ones become operators with a verified fleet.
+CREATE TABLE IF NOT EXISTS operator_applications (
+  id TEXT PRIMARY KEY,
+  company TEXT NOT NULL,
+  certificate TEXT NOT NULL,
+  certificate_number TEXT NOT NULL,
+  contact_name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  website TEXT,
+  fleet TEXT NOT NULL,
+  notes TEXT,
+  status TEXT NOT NULL,
+  operator_id TEXT,
+  decision_note TEXT,
+  created_at INTEGER NOT NULL,
+  decided_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS operator_applications_by_status ON operator_applications(status, created_at);
+
 -- Transactional outbox: written in the same transaction as the state change, delivered later.
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

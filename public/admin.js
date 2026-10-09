@@ -3,7 +3,8 @@ import { api, esc, money, when, toast, LOGO } from './common.js';
 const $ = (s) => document.querySelector(s);
 $('#brand').insertAdjacentHTML('afterbegin', LOGO);
 let key = sessionStorage.getItem('adminKey') || '';
-let tab = 'integrations';
+let tab = 'operators';
+let issuedKeys = null;
 let openThread = null;
 
 const dur = (ms) => (ms == null ? '—' : ms >= 3_600_000 ? `${(ms / 3_600_000).toFixed(1)}h` : `${Math.round(ms / 60_000)}m`);
@@ -14,6 +15,42 @@ const statusTag = (s) => {
 };
 
 const views = {
+  async operators() {
+    const [apps, ops] = await Promise.all([api('/api/admin/operator-applications', { key }), api('/api/admin/operators', { key })]);
+    const pending = apps.filter((a) => a.status === 'pending');
+    const decided = apps.filter((a) => a.status !== 'pending').slice(0, 20);
+    const keys = issuedKeys;
+    issuedKeys = null;
+    return `
+      ${keys ? `<div class="notice good stack"><strong>${esc(keys.company)} approved.</strong> These keys are shown once and were emailed to the operator.
+        <div>Portal key: <code>${esc(keys.portalKey)}</code></div><div>Feed key: <code>${esc(keys.feedKey)}</code> for <code>POST /api/feeds/api:${esc(keys.operatorId)}</code></div></div>` : ''}
+      <div class="card pad stack">
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">Operator applications</h2>
+          <a href="/operator/apply" target="_blank" class="faint">Public application form ↗</a></div>
+        <p class="faint" style="margin:0">Before approving, verify the certificate. US operators: look up the company and certificate number on the FAA's list of Part 135 certificate holders. Check that each tail number is on that certificate.</p>
+      </div>
+      ${pending.length ? pending.map((a) => `
+        <div class="card pad stack" style="margin-top:12px">
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h3 style="margin:0">${esc(a.company)}</h3>${statusTag(a.status)}<span class="faint">applied ${esc(when(a.createdAt))}</span></div>
+          <div class="grid2">
+            <div><div class="faint">Certificate</div>${esc(a.certificate)} · <strong>${esc(a.certificateNumber)}</strong></div>
+            <div><div class="faint">Contact</div>${esc(a.contactName)} · <a href="mailto:${esc(a.email)}">${esc(a.email)}</a> · ${esc(a.phone)}${a.website ? ` · <a href="${esc(a.website)}" target="_blank" rel="noopener">${esc(a.website)}</a>` : ''}</div>
+          </div>
+          <div class="scroll-x"><table class="data"><thead><tr><th>Tail</th><th>Aircraft</th><th>Category</th><th>Seats</th><th>Base</th><th>Year</th><th></th></tr></thead><tbody>
+            ${a.fleet.map((f) => `<tr><td>${esc(f.tail)}</td><td>${esc(f.typeName ?? f.model)}</td><td>${esc(f.category ?? '?')}</td><td>${f.seats}</td><td>${esc(f.homeBase)}</td><td>${f.year}</td>
+              <td class="faint">${esc(f.problems.map((p) => p.replace(/^note: /, '')).join('; '))}</td></tr>`).join('')}</tbody></table></div>
+          ${a.notes ? `<div class="faint">Notes: ${esc(a.notes)}</div>` : ''}
+          <div style="display:flex;gap:8px;flex-wrap:wrap"><button data-app-approve="${esc(a.id)}" data-company="${esc(a.company)}">Approve</button><button class="danger" data-app-reject="${esc(a.id)}">Reject</button></div>
+        </div>`).join('') : '<div class="card empty" style="margin-top:12px">No applications waiting.</div>'}
+      <h2 style="margin:24px 0 8px">Operators</h2>
+      ${ops.length ? `<div class="card scroll-x"><table class="data"><thead><tr><th>Name</th><th>Certificate</th><th>Contact</th><th>Status</th><th></th></tr></thead><tbody>
+        ${ops.map((o) => `<tr><td>${esc(o.name)}</td><td>${esc(o.certificate)}</td><td>${esc(o.contact?.email ?? '')} ${esc(o.contact?.phone ?? '')}</td><td>${statusTag(o.status)}</td>
+          <td>${o.source === 'aviapages' ? '<span class="faint">network</span>' : `<button class="secondary small" data-op-status="${esc(o.id)}" data-to="${o.status === 'active' ? 'suspended' : 'active'}">${o.status === 'active' ? 'Suspend' : 'Reactivate'}</button>`}</td></tr>`).join('')}
+        </tbody></table></div>` : '<div class="card empty">No operators yet. Share the application form with operators you sign.</div>'}
+      ${decided.length ? `<h3 style="margin:24px 0 8px">Recent decisions</h3><div class="card scroll-x"><table class="data"><tbody>
+        ${decided.map((a) => `<tr><td>${esc(a.company)}</td><td>${statusTag(a.status)}</td><td class="faint">${esc(a.decisionNote ?? '')}</td><td class="faint">${esc(a.decidedAt ? when(a.decidedAt) : '')}</td></tr>`).join('')}</tbody></table></div>` : ''}`;
+  },
+
   async integrations() {
     const { aviapages: a } = await api('/api/admin/integrations', { key });
     if (!a.enabled) return '<div class="card empty">Aviapages integration is off. Set <code>AVIAPAGES_API_KEY</code> (live) or <code>AVIAPAGES_MODE=mock</code> and restart.</div>';
@@ -163,6 +200,9 @@ async function refreshAttention() {
     const n = (await api('/api/admin/threads?attention=1', { key })).length;
     $('#attn').hidden = n === 0;
     $('#attn').textContent = String(n);
+    const p = (await api('/api/admin/operator-applications?status=pending', { key })).length;
+    $('#apps').hidden = p === 0;
+    $('#apps').textContent = String(p);
   } catch { /* ignore */ }
 }
 
@@ -245,11 +285,23 @@ $('#panel').addEventListener('click', async (e) => {
       await api(`/api/admin/threads/${openThread}/resolve`, { method: 'POST', key });
     } else if (btn.dataset.confirm) {
       await api(`/api/admin/bookings/${btn.dataset.confirm}/confirm`, { method: 'POST', key });
-      toast('Confirmed — card captured, operator notified.');
+      toast('Confirmed — traveler and operator notified.');
     } else if (btn.dataset.decline) {
       const reason = prompt('Reason (shared with the operator thread):') ?? '';
       await api(`/api/admin/bookings/${btn.dataset.decline}/decline`, { method: 'POST', key, body: { reason } });
       toast('Declined — authorization released.');
+    } else if (btn.dataset.appApprove) {
+      if (!confirm(`Approve ${btn.dataset.company}? Their aircraft become verified and they can publish legs immediately.`)) return;
+      const r = await api(`/api/admin/operator-applications/${btn.dataset.appApprove}/approve`, { method: 'POST', key });
+      issuedKeys = { ...r, company: btn.dataset.company };
+    } else if (btn.dataset.appReject) {
+      const reason = prompt('Reason (emailed to the applicant):');
+      if (reason === null) return;
+      await api(`/api/admin/operator-applications/${btn.dataset.appReject}/reject`, { method: 'POST', key, body: { reason } });
+      toast('Rejected; applicant emailed.');
+    } else if (btn.dataset.opStatus) {
+      await api(`/api/admin/operators/${btn.dataset.opStatus}/status`, { method: 'POST', key, body: { status: btn.dataset.to } });
+      toast(btn.dataset.to === 'suspended' ? 'Suspended; their legs are hidden.' : 'Reactivated.');
     } else if (btn.dataset.approve) {
       const r = await api(`/api/admin/legs/${btn.dataset.approve}/approve-price`, { method: 'POST', key });
       toast(`Approved at ${money(r.approvedPriceCents)}`);

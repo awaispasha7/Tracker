@@ -39,6 +39,7 @@ const minutes = (name: string, fallback: number) => (process.env[name] ? Number(
 
 const app = createApp({
   dbPath: DB_PATH,
+  portalUrl: `${SITE.url}/operator`,
   payments: SITE.payments === 'invoice' ? new InvoicePaymentProvider() : new MockPaymentProvider(),
   aviapages: {
     mode: AVP_MODE,
@@ -105,7 +106,7 @@ const server = createServer(async (req, res) => {
     res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'max-age=86400' }).end(mockPhoto(path));
     return;
   }
-  const file = path === '/' ? 'index.html' : path === '/operator' ? 'operator.html' : path === '/admin' ? 'admin.html' : path === '/charter' ? 'charter.html' : path.slice(1);
+  const file = path === '/' ? 'index.html' : path === '/operator' ? 'operator.html' : path === '/admin' ? 'admin.html' : path === '/charter' ? 'charter.html' : path === '/operator/apply' ? 'operator-apply.html' : path.slice(1);
   const full = normalize(join(PUBLIC_DIR, file));
   if (!full.startsWith(PUBLIC_DIR)) {
     res.writeHead(403).end();

@@ -23,6 +23,7 @@ import { CharterRequestService } from './charter/charter-requests.ts';
 import { SkyAccessClient, type SkyAccessConfig } from './integrations/skyaccess/client.ts';
 import { SkyAccessMock } from './integrations/skyaccess/mock.ts';
 import { SkyAccessService } from './integrations/skyaccess/service.ts';
+import { OnboardingService } from './operators/onboarding.ts';
 
 export interface AviapagesOptions {
   /** 'live' calls the real API with apiKey; 'mock' uses the in-process mock; 'off' disables the integration. */
@@ -48,6 +49,8 @@ export interface SkyAccessOptions {
 export interface AppOptions {
   aviapages?: AviapagesOptions;
   skyaccess?: SkyAccessOptions;
+  /** Public operator portal URL, used in onboarding emails. */
+  portalUrl?: string;
   comms?: Partial<CommsConfig>;
   dbPath?: string;
   clock?: Clock;
@@ -86,7 +89,8 @@ export function createApp(opts: AppOptions = {}) {
   const comms = new CommsService({ db, fleet, legs, market, bookings, outbox, kv, clock, client: aviapages?.client ?? null, config: opts.comms });
   const charters = new CharterRequestService({ db, fleet, legs, reference, outbox, pricing, comms, calculators, client: aviapages?.client ?? null, clock });
   const skyaccess = createSkyAccess(opts.skyaccess, { db, clock });
-  return { db, clock, fleet, legs, market, reference, kv, calcCache, aviapages, skyaccess, comms, calculators, charters, pricing, search, outbox, payments, bookings, alerts, ingest };
+  const onboarding = new OnboardingService({ db, fleet, reference, outbox, clock, portalUrl: opts.portalUrl });
+  return { db, onboarding, clock, fleet, legs, market, reference, kv, calcCache, aviapages, skyaccess, comms, calculators, charters, pricing, search, outbox, payments, bookings, alerts, ingest };
 }
 
 export type App = ReturnType<typeof createApp>;
