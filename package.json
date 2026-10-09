@@ -10,7 +10,6 @@
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.ts",
     "dev": "node --disable-warning=ExperimentalWarning --watch src/server.ts",
-    "seed": "node --disable-warning=ExperimentalWarning scripts/seed.ts",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p .",
     "e2e": "node --disable-warning=ExperimentalWarning scripts/e2e.ts",
