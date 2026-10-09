@@ -182,3 +182,13 @@ and the cancellation risk travelers carry (auth-then-capture, automatic refunds,
 | Auth | bearer keys, email-scoped booking lookup | traveler accounts (magic link), operator SSO, admin RBAC, audit log |
 | Compliance | agreement capture | legal review of the agreement, DOT Part 295 broker disclosures, operator certificate verification at onboarding, passenger document checks, PCI scope kept at the provider |
 | Ops | `/admin` review queue | alerting when ingest error rate, quarantine rate or `PRICE_JUMP` holds spike |
+
+## Aviapages integration
+
+Aviapages is wired in as one more feed source (`aviapages`, an operator-run marketplace: trusted
+below a signed operator's own channel, its posted prices usable as the operator's ask) plus three
+services: the communications hub (`src/comms/`: RFQs, offers, email and portal threads), the
+calculators (`src/integrations/aviapages/calculators.ts`: cached flight times and market prices fed
+to pricing), and custom charter requests (`src/charter/`: offers become private legs booked through
+the normal flow). Setup, budgets and the trial plan: [AVIAPAGES.md](AVIAPAGES.md). What was tested:
+[FEATURE-CHECK.md](FEATURE-CHECK.md).

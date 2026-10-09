@@ -101,3 +101,13 @@ test('parses Aviapages time formats as UTC', () => {
   assert.equal(parseAvpTime('2026-10-20T14:00:00Z'), Date.parse('2026-10-20T14:00:00Z'));
   assert.equal(parseAvpTime('2026-10-20T16:00:00+02:00'), Date.parse('2026-10-20T14:00:00Z'));
 });
+
+test('a base URL with a path prefix is preserved (and the mock honours it)', async () => {
+  const clock = new FakeClock();
+  const mock = new AviapagesMock({ clock, baseUrl: 'http://localhost:3000/mock-aviapages', perPage: 10 });
+  const client = new AviapagesClient({ config: { ...DEFAULT_CONFIG, baseUrl: mock.baseUrl, apiKey: mock.validKey }, fetch: mock.fetch, db: new Database(':memory:'), clock, sleep: async () => {} });
+  assert.match(client.buildUrl('/v3/empty_legs/'), /\/mock-aviapages\/v3\/empty_legs\/$/);
+  let n = 0;
+  for await (const { page } of client.paginate('/v3/empty_legs/', {})) n += page.results.length;
+  assert.equal(n, mock.activeLegs().length);
+});

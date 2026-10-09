@@ -7,8 +7,9 @@ import { searchAirports, getAirport } from '../reference/airports.ts';
 import { getAircraftType } from '../reference/aircraft-types.ts';
 import { AGREEMENT_HASH, AGREEMENT_TEXT, AGREEMENT_VERSION } from '../booking/agreement.ts';
 import { isListable } from '../inventory/search.ts';
+import { runContractCheck } from '../integrations/aviapages/contract-check.ts';
 
-export function buildRouter(app: App, opts: { adminKey: string }): Router {
+export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: string }): Router {
   const r = new Router();
   const now = () => app.clock.now();
 
@@ -59,21 +60,40 @@ export function buildRouter(app: App, opts: { adminKey: string }): Router {
     }, now());
   });
 
-  r.on('GET', '/api/legs/:id', ({ params, query }) => {
+  /** Spends calculator calls only when a traveler shows intent; bounded so a slow provider never stalls the page. */
+  const warm = async (legId: string, pax: number) => {
+    const leg = app.legs.get(legId);
+    if (!leg?.typeCode) return;
+    await Promise.race([
+      app.calculators.warm(leg.fromIcao, leg.toIcao, leg.typeCode, { tail: leg.tail, pax }),
+      new Promise((r) => setTimeout(r, 4000).unref()),
+    ]);
+  };
+
+  r.on('GET', '/api/legs/:id', async ({ params, query }) => {
+    const pax = Math.max(1, num(query.get('pax')) ?? 1);
+    if (app.legs.get(params.id)) await warm(params.id, pax);
     const leg = app.legs.get(params.id);
     if (!leg || !leg.operatorId) throw new AppError(404, 'leg_not_found', 'Flight not found');
     const aircraft = app.fleet.getAircraft(leg.tail);
     const operator = app.fleet.getOperator(leg.operatorId);
-    const pax = Math.max(1, num(query.get('pax')) ?? 1);
     const price = app.pricing.price({ leg, pax, seats: aircraft?.seats ?? 0, now: now() });
-    const bookable = price.ok && isListable(leg, app.pricing.config.minConfidence);
+    const sellable = leg.visibility === 'private'
+      ? leg.supplyStatus === 'available' && leg.commerceStatus === 'open'
+      : isListable(leg, app.pricing.config.minConfidence);
+    const bookable = price.ok && sellable;
+    const insight = leg.typeCode ? app.calculators.flight(leg.fromIcao, leg.toIcao, leg.typeCode) : undefined;
     return {
-      leg: legView(leg),
-      aircraft: aircraft && { seats: aircraft.seats, year: aircraft.year, homeBase: aircraft.homeBase },
-      operator: operator && { id: operator.id, name: operator.name, certificate: operator.certificate },
+      leg: { ...legView(leg), note: leg.note ?? null, kind: leg.kind ?? 'empty_leg' },
+      aircraft: aircraft && { seats: aircraft.seats, year: aircraft.year, homeBase: aircraft.homeBase, images: aircraft.images ?? [], amenities: aircraft.amenities ?? {} },
+      operator: operator && {
+        id: operator.id, name: operator.name, certificate: operator.certificate, source: operator.source ?? 'direct',
+        responseRate: operator.contact?.responseRate ?? null, confirmation: operator.source === 'aviapages' ? 'on_request' : 'portal',
+      },
+      flight: price.flight && { ...price.flight, fuelKg: insight?.fuelKg ?? null, minutes: insight?.minutes ?? null },
       bookable,
       price: bookable
-        ? { totalCents: price.totalCents, currency: price.currency, lines: price.lines, savingsPct: price.savingsPct, fullCharterEstimateCents: price.fullCharterEstimateCents, flight: price.flight }
+        ? { totalCents: price.totalCents, currency: price.currency, lines: price.lines, savingsPct: price.savingsPct, fullCharterEstimateCents: price.fullCharterEstimateCents, fullCharterSource: price.fullCharterSource, flight: price.flight }
         : null,
       // Travelers see that it isn't bookable, not our internal guardrail detail.
       unavailableReason: bookable ? null : leg.commerceStatus !== 'open' ? 'reserved' : 'unavailable',
@@ -83,10 +103,12 @@ export function buildRouter(app: App, opts: { adminKey: string }): Router {
   r.on('GET', '/api/agreement', () => ({ version: AGREEMENT_VERSION, hash: AGREEMENT_HASH, text: AGREEMENT_TEXT }));
 
   // ---------- public: booking ----------
-  r.on('POST', '/api/quotes', ({ body }) => {
+  r.on('POST', '/api/quotes', async ({ body }) => {
     const b = body as { legId?: string; pax?: number };
     if (!b?.legId) throw new AppError(400, 'bad_request', 'legId is required');
-    return app.bookings.createQuote(b.legId, Math.max(1, Math.floor(Number(b.pax ?? 1))));
+    const pax = Math.max(1, Math.floor(Number(b.pax ?? 1)));
+    await warm(b.legId, pax);
+    return app.bookings.createQuote(b.legId, pax);
   });
 
   r.on('POST', '/api/bookings', async ({ body, req, res }) => {
@@ -99,10 +121,40 @@ export function buildRouter(app: App, opts: { adminKey: string }): Router {
     return booking;
   });
 
-  r.on('GET', '/api/bookings/:id', ({ params, query }) => app.bookings.viewForCustomer(params.id, query.get('email') ?? ''));
+  r.on('GET', '/api/bookings/:id', ({ params, query }) => ({
+    ...app.bookings.viewForCustomer(params.id, query.get('email') ?? ''),
+    operatorUpdates: app.comms.travelerTimeline(params.id),
+  }));
 
   r.on('POST', '/api/bookings/:id/cancel', ({ params, body }) =>
     app.bookings.customerCancel(params.id, String((body as { email?: string })?.email ?? '')));
+
+  r.on('GET', '/api/config', () => ({
+    aviapages: app.aviapages ? { enabled: true, mode: app.aviapages.mode } : { enabled: false, mode: 'off' },
+    charterQuotes: app.charters.enabled,
+  }));
+
+  // ---------- public: custom charter requests ----------
+  r.on('POST', '/api/charter-requests', async ({ body, res }) => {
+    const out = await app.charters.create(body as Parameters<App['charters']['create']>[0]);
+    res.statusCode = 201;
+    return out;
+  });
+  r.on('GET', '/api/charter-requests/:id', ({ params, query }) => app.charters.view(params.id, query.get('email') ?? ''));
+  r.on('POST', '/api/charter-requests/:id/send', ({ params, body }) => {
+    const b = body as { email?: string; aircraftIds?: number[] };
+    return app.charters.send(params.id, String(b?.email ?? ''), Array.isArray(b?.aircraftIds) ? b.aircraftIds.map(Number) : []);
+  });
+
+  // ---------- inbound email webhook (map your provider's payload to {from, to, subject, text, messageId}) ----------
+  r.on('POST', '/api/inbound/email', ({ query, body }) => {
+    const a = Buffer.from(query.get('token') ?? '');
+    const b = Buffer.from(opts.inboundToken ?? "");
+    if (!opts.inboundToken || a.length !== b.length || !timingSafeEqual(a, b)) throw new AppError(401, 'unauthorized', 'Bad inbound token');
+    const m = body as { from?: string; to?: string; subject?: string; text?: string; messageId?: string };
+    if (!m?.from || typeof m.text !== 'string') throw new AppError(400, 'bad_request', 'from and text are required');
+    return app.comms.inboundEmail({ from: m.from, to: m.to, subject: m.subject, text: m.text, messageId: m.messageId });
+  });
 
   // ---------- public: alerts ----------
   r.on('POST', '/api/alerts', ({ body }) => {
@@ -182,6 +234,20 @@ export function buildRouter(app: App, opts: { adminKey: string }): Router {
     return legView(await app.ingest.operatorWithdraw(op.id, ctx.params.id));
   });
 
+  r.on('GET', '/api/operator/threads', (ctx) => app.comms.list({ operatorId: requireOperator(ctx).id }));
+  r.on('GET', '/api/operator/threads/:id', (ctx) => {
+    const op = requireOperator(ctx);
+    const t = app.comms.thread(ctx.params.id);
+    if (t.operator_id !== op.id) throw new AppError(404, 'thread_not_found', 'Conversation not found');
+    const view = app.comms.threadView(t);
+    // Operators see the conversation, not our internal notes.
+    return { ...view, messages: view.messages!.filter((m) => m.direction !== 'internal') };
+  });
+  r.on('POST', '/api/operator/threads/:id/reply', (ctx) => {
+    app.comms.portalReply(requireOperator(ctx).id, ctx.params.id, String((ctx.body as { body?: string })?.body ?? ''));
+    return { ok: true };
+  });
+
   r.on('GET', '/api/operator/bookings', (ctx) => app.bookings.listForOperator(requireOperator(ctx).id));
   r.on('POST', '/api/operator/bookings/:id/confirm', (ctx) => app.bookings.operatorConfirm(ctx.params.id, requireOperator(ctx).id));
   r.on('POST', '/api/operator/bookings/:id/decline', (ctx) =>
@@ -239,6 +305,106 @@ export function buildRouter(app: App, opts: { adminKey: string }): Router {
     requireAdmin(ctx);
     return app.bookings.ledger(ctx.query.get('booking') ?? undefined);
   });
+  // bookings across all operators; ops confirm/decline on behalf of network operators
+  r.on('GET', '/api/admin/bookings', (ctx) => {
+    requireAdmin(ctx);
+    return app.bookings.listAll(ctx.query.get('status') ?? undefined).map((b) => {
+      const op = app.fleet.getOperator(b.operatorId);
+      const t = app.comms.threadForBooking(b.id);
+      return { ...b, operator: op ? { id: op.id, name: op.name, source: op.source ?? 'direct' } : null, threadId: t?.id ?? null, threadStatus: t?.status ?? null };
+    });
+  });
+  r.on('POST', '/api/admin/bookings/:id/confirm', async (ctx) => {
+    requireAdmin(ctx);
+    const v = await app.bookings.operatorConfirm(ctx.params.id, app.bookings.operatorOf(ctx.params.id));
+    await app.comms.afterDecision(ctx.params.id, 'confirmed');
+    return v;
+  });
+  r.on('POST', '/api/admin/bookings/:id/decline', async (ctx) => {
+    requireAdmin(ctx);
+    const reason = String((ctx.body as { reason?: string })?.reason ?? 'declined by ops');
+    const v = await app.bookings.operatorDecline(ctx.params.id, app.bookings.operatorOf(ctx.params.id), reason);
+    await app.comms.afterDecision(ctx.params.id, 'declined');
+    return v;
+  });
+
+  // operator conversations
+  r.on('GET', '/api/admin/threads', (ctx) => {
+    requireAdmin(ctx);
+    return app.comms.list({ attention: ctx.query.get('attention') === '1', status: ctx.query.get('status') ?? undefined });
+  });
+  r.on('GET', '/api/admin/threads/:id', (ctx) => {
+    requireAdmin(ctx);
+    return app.comms.threadView(app.comms.thread(ctx.params.id));
+  });
+  r.on('POST', '/api/admin/threads/:id/messages', (ctx) => {
+    requireAdmin(ctx);
+    app.comms.send(ctx.params.id, String((ctx.body as { body?: string })?.body ?? ''));
+    return app.comms.threadView(app.comms.thread(ctx.params.id));
+  });
+  r.on('POST', '/api/admin/threads/:id/retry', async (ctx) => {
+    requireAdmin(ctx);
+    await app.comms.retry(ctx.params.id);
+    return app.comms.threadView(app.comms.thread(ctx.params.id));
+  });
+  r.on('POST', '/api/admin/threads/:id/resolve', (ctx) => {
+    requireAdmin(ctx);
+    app.comms.update(ctx.params.id, { needsAttention: false, status: 'closed' });
+    return app.comms.threadView(app.comms.thread(ctx.params.id));
+  });
+  r.on('GET', '/api/admin/charter-requests', (ctx) => {
+    requireAdmin(ctx);
+    return app.charters.list();
+  });
+
+  // integrations
+  r.on('GET', '/api/admin/integrations', (ctx) => {
+    requireAdmin(ctx);
+    const avp = app.aviapages;
+    if (!avp) return { aviapages: { enabled: false, mode: 'off' } };
+    const ops = app.fleet.listOperators();
+    const aircraft = app.fleet.listAircraft();
+    return {
+      aviapages: {
+        enabled: true,
+        mode: avp.mode,
+        baseUrl: avp.client.config.baseUrl,
+        usage: avp.client.usage(),
+        defaultBudget: avp.client.config.defaultBudget,
+        sync: avp.sync.status(),
+        comms: app.comms.pollState(),
+        openRfqs: app.comms.hasOpenRfqs(),
+        learned: {
+          operators: ops.filter((o) => o.source === 'aviapages').length,
+          aircraft: aircraft.filter((a) => a.source === 'aviapages').length,
+          airports: app.reference.airports().length,
+          aircraftTypes: app.reference.aircraftTypes().length,
+          ...app.calculators.stats(),
+          archivedResponses: app.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM api_archive')?.n ?? 0,
+        },
+        lastCheck: app.kv.get('aviapages:last-check') ?? null,
+      },
+    };
+  });
+  r.on('POST', '/api/admin/integrations/aviapages/sync', async (ctx) => {
+    requireAdmin(ctx);
+    if (!app.aviapages) throw new AppError(409, 'integration_off', 'Aviapages integration is off');
+    const kind = (ctx.body as { kind?: string })?.kind === 'incremental' ? 'incremental' : 'full';
+    return kind === 'full' ? app.aviapages.sync.full() : app.aviapages.sync.incremental();
+  });
+  r.on('POST', '/api/admin/integrations/aviapages/poll', async (ctx) => {
+    requireAdmin(ctx);
+    return app.comms.poll();
+  });
+  r.on('POST', '/api/admin/integrations/aviapages/check', async (ctx) => {
+    requireAdmin(ctx);
+    if (!app.aviapages) throw new AppError(409, 'integration_off', 'Aviapages integration is off');
+    const out = await runContractCheck(app.aviapages.client, { includeWrites: !!(ctx.body as { includeWrites?: boolean })?.includeWrites, now: now() });
+    const record = { at: new Date(now()).toISOString(), mode: app.aviapages.mode, ...out };
+    app.kv.set('aviapages:last-check', record, now());
+    return record;
+  });
+
   r.on('POST', '/api/admin/market', (ctx) => {
     requireAdmin(ctx);
     const b = ctx.body as { fuelCentsPerGal?: number; fx?: Record<string, number> };

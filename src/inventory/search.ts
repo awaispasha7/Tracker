@@ -36,6 +36,7 @@ export interface IndexedLeg {
   leg: Leg;
   type: AircraftType;
   seats: number;
+  image: string | null;
   operator: Operator;
   from: Airport;
   to: Airport;
@@ -49,7 +50,8 @@ export interface SearchHit {
   departEarliest: string;
   departLatest: string;
   aircraft: { type: string; category: AircraftCategory; seats: number; tail: string };
-  operator: { id: string; name: string; certificate: string };
+  operator: { id: string; name: string; certificate: string; source: 'direct' | 'aviapages'; confirmation: 'portal' | 'on_request' };
+  image: string | null;
   price: { totalCents: number; currency: 'USD'; fullCharterEstimateCents: number; savingsPct: number };
   blockHours: number;
   distanceNm: number;
@@ -114,7 +116,7 @@ export class SearchIndex {
       const op = operators.get(leg.operatorId);
       if (!ac || !op) continue;
       const entry: IndexedLeg = {
-        leg, type: getAircraftType(leg.typeCode), seats: ac.seats, operator: op,
+        leg, type: getAircraftType(leg.typeCode), seats: ac.seats, image: ac.images?.[0] ?? null, operator: op,
         from: getAirport(leg.fromIcao), to: getAirport(leg.toIcao),
       };
       const bucket = byOrigin.get(leg.fromIcao) ?? [];
@@ -209,7 +211,11 @@ export class SearchIndex {
           departEarliest: new Date(leg.departEarliest).toISOString(),
           departLatest: new Date(leg.departLatest).toISOString(),
           aircraft: { type: entry.type.name, category: entry.type.category, seats: entry.seats, tail: leg.tail },
-          operator: { id: entry.operator.id, name: entry.operator.name, certificate: entry.operator.certificate },
+          operator: {
+            id: entry.operator.id, name: entry.operator.name, certificate: entry.operator.certificate, source: entry.operator.source ?? 'direct',
+            confirmation: entry.operator.source === 'aviapages' ? 'on_request' : 'portal',
+          },
+          image: entry.image,
           price: { totalCents: price.totalCents, currency: 'USD', fullCharterEstimateCents: price.fullCharterEstimateCents, savingsPct: price.savingsPct },
           blockHours: price.flight?.blockHours ?? 0,
           distanceNm: price.flight?.distanceNm ?? 0,

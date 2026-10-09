@@ -26,11 +26,18 @@
       <div class="hero" style="padding-bottom:0"><h1 id="op-name"></h1><p class="muted" id="op-meta"></p></div>
       <div class="tabs" role="tablist">
         <button role="tab" data-tab="bookings" aria-selected="true">Booking requests</button>
+        <button role="tab" data-tab="messages" aria-selected="false">Messages</button>
         <button role="tab" data-tab="legs" aria-selected="false">Empty legs</button>
         <button role="tab" data-tab="post" aria-selected="false">Post legs</button>
         <button role="tab" data-tab="fleet" aria-selected="false">Fleet</button>
       </div>
       <div data-panel="bookings"></div>
+      <div data-panel="messages" hidden>
+        <div class="split">
+          <div class="thread-list" id="threads"></div>
+          <div class="card pad" id="thread"><p class="faint">Select a conversation.</p></div>
+        </div>
+      </div>
       <div data-panel="legs" hidden></div>
       <div data-panel="post" hidden>
         <div class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start">

@@ -12,10 +12,14 @@
     "dev": "node --disable-warning=ExperimentalWarning --watch src/server.ts",
     "seed": "node --disable-warning=ExperimentalWarning scripts/seed.ts",
     "test": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "e2e": "node --disable-warning=ExperimentalWarning scripts/e2e.ts",
+    "aviapages:check": "node --disable-warning=ExperimentalWarning scripts/aviapages-check.ts",
+    "aviapages:harvest": "node --disable-warning=ExperimentalWarning scripts/aviapages-harvest.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "playwright-core": "^1.49.1",
     "typescript": "~5.9.3"
   }
 }

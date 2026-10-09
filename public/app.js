@@ -56,7 +56,8 @@ function renderResults({ results, meta }) {
     return;
   }
   $('#results').innerHTML = results.map((h) => `
-    <article class="card leg" data-leg="${esc(h.legId)}" tabindex="0">
+    <article class="card leg${h.image ? ' has-photo' : ''}" data-leg="${esc(h.legId)}" tabindex="0">
+      ${h.image ? `<img class="thumb" src="${esc(h.image)}" alt="" loading="lazy">` : ''}
       <div>
         <div class="route">
           <span>${esc(h.from.iata)}<small>${esc(h.from.city)}</small></span>
@@ -71,7 +72,7 @@ function renderResults({ results, meta }) {
         </div>
         <div class="notes">
           ${h.matchNotes.map((n) => `<span class="tag">${esc(n)}</span>`).join('')}
-          ${h.confidence < 0.8 ? '<span class="tag warn">Availability confirmed on request</span>' : ''}
+          ${h.operator.confirmation === 'on_request' ? '<span class="tag warn">Operator confirms on request</span>' : h.confidence < 0.8 ? '<span class="tag warn">Availability confirmed on request</span>' : '<span class="tag good">Direct operator</span>'}
         </div>
       </div>
       <div class="price">
@@ -127,12 +128,37 @@ function breakdown(lines, total) {
     <tr class="total"><td>Total, all-in</td><td>${money(total, { cents: true })}</td></tr></table>`;
 }
 
-async function showLeg(legId) {
+const AMENITY_LABELS = {
+  wireless_internet: 'Wi-Fi', lavatory: 'Lavatory', cabin_crew: 'Cabin crew', hot_meal: 'Hot meals', entertainment_system: 'Entertainment',
+  pets_allowed: 'Pets allowed', shower: 'Shower', satellite_phone: 'Satellite phone',
+};
+
+function gallery(images) {
+  if (!images?.length) return '';
+  return `<div class="gallery">${images.slice(0, 4).map((u) => `<img src="${esc(u)}" alt="" loading="lazy">`).join('')}</div>`;
+}
+
+function amenities(a) {
+  const on = Object.entries(a ?? {}).filter(([k, v]) => v === true && AMENITY_LABELS[k]).map(([k]) => AMENITY_LABELS[k]);
+  if (a?.sleeping_places) on.push(`${a.sleeping_places} beds`);
+  return on.length ? `<div class="notes">${on.map((x) => `<span class="tag">${esc(x)}</span>`).join('')}</div>` : '';
+}
+
+function flightLine(f) {
+  if (!f) return '';
+  const mins = f.minutes ?? Math.round((f.blockHours - 0.3) * 60);
+  const hm = `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+  const stops = f.fuelStops ? ` · ${f.fuelStops} fuel stop${f.fuelStops > 1 ? 's' : ''}` : ' · nonstop';
+  const src = f.source === 'aviapages' ? 'airway route with typical winds' : 'estimate';
+  return `<div class="faint">Flight time ${hm}${stops} · ${f.distanceNm.toLocaleString()} nm <span title="Source">(${src})</span></div>`;
+}
+
+async function showLeg(legId, paxOverride) {
   stopPoll();
   openDrawer('Flight');
   const body = $('#drawer-body');
   body.innerHTML = '<p class="muted">Loading…</p>';
-  const pax = Number($('#pax').value) || 1;
+  const pax = paxOverride || Number($('#pax').value) || 1;
   let d;
   try {
     d = await api(`/api/legs/${encodeURIComponent(legId)}?pax=${pax}`);
@@ -143,21 +169,28 @@ async function showLeg(legId) {
   const { leg } = d;
   $('#drawer-title').textContent = `${leg.from.iata} → ${leg.to.iata}`;
   body.innerHTML = `
+    ${gallery(d.aircraft?.images)}
     <div>
-      <div class="route"><span>${esc(leg.from.iata)}<small>${esc(leg.from.name)}</small></span><span class="arrow">→</span><span>${esc(leg.to.iata)}<small>${esc(leg.to.name)}</small></span></div>
+      <div class="route"><span>${esc(leg.from.iata || leg.from.icao)}<small>${esc(leg.from.name)}</small></span><span class="arrow">→</span><span>${esc(leg.to.iata || leg.to.icao)}<small>${esc(leg.to.name)}</small></span></div>
       <p class="muted" style="margin:.5em 0 0">${esc(windowText(leg.departEarliest, leg.departLatest))}</p>
+      ${flightLine(d.flight)}
     </div>
     <div class="grid2">
-      <div><div class="faint">Aircraft</div>${esc(leg.aircraft?.name)} (${esc(leg.tail)})<br><span class="faint">${d.aircraft?.seats} seats · built ${d.aircraft?.year}</span></div>
-      <div><div class="faint">Operated by</div>${esc(d.operator?.name)}<br><span class="faint">${esc(d.operator?.certificate)}</span></div>
+      <div><div class="faint">Aircraft</div>${esc(leg.aircraft?.name)} (${esc(leg.tail)})<br><span class="faint">${d.aircraft?.seats} seats${d.aircraft?.year ? ` · built ${d.aircraft.year}` : ''}</span></div>
+      <div><div class="faint">Operated by</div>${esc(d.operator?.name)}<br><span class="faint">${esc(d.operator?.certificate)}</span>
+        ${d.operator?.responseRate ? `<br><span class="faint">Answers ${Math.round(d.operator.responseRate * 100)}% of requests</span>` : ''}</div>
     </div>
+    ${amenities(d.aircraft?.amenities)}
+    ${leg.note ? `<div class="notice info">Operator note: ${esc(leg.note)}</div>` : ''}
     ${d.bookable ? `
       <div>
         <h3>Price for ${pax} passenger${pax > 1 ? 's' : ''}</h3>
         ${breakdown(d.price.lines, d.price.totalCents)}
-        <p class="faint">A regular one-way charter on this aircraft is about ${money(d.price.fullCharterEstimateCents)}. You save ${d.price.savingsPct}%.</p>
+        ${leg.kind === 'charter_offer' ? '<p class="faint">Full charter offer from the operator, all-in.</p>'
+          : `<p class="faint">A regular one-way charter on this aircraft is about ${money(d.price.fullCharterEstimateCents)}${d.price.fullCharterSource === 'aviapages' ? ' (market data)' : ''}. You save ${d.price.savingsPct}%.</p>`}
       </div>
-      <div class="notice warn">Empty legs follow the operator's primary trip. The time can shift within the window, or the flight can cancel (full refund). Keep a refundable backup.</div>
+      ${d.operator?.confirmation === 'on_request' ? `<div class="notice info">We'll send your request to ${esc(d.operator.name)} the moment you book. Your card is only charged once they confirm, usually within a few hours.</div>` : ''}
+      ${leg.kind === 'charter_offer' ? '' : `<div class="notice warn">Empty legs follow the operator's primary trip. The time can shift within the window, or the flight can cancel (full refund). Keep a refundable backup.</div>`}
       <button id="get-quote">Continue to book</button>`
     : `<div class="notice bad">${d.unavailableReason === 'reserved' ? 'Someone has just requested this flight.' : 'This flight is not available to book right now.'}</div>`}
   `;
@@ -171,7 +204,7 @@ async function startBooking(leg, pax) {
     [quote, agreement] = await Promise.all([api('/api/quotes', { method: 'POST', body: { legId: leg.id, pax } }), api('/api/agreement')]);
   } catch (e) {
     toast(e.message);
-    return showLeg(leg.id);
+    return showLeg(leg.id, pax);
   }
   const expires = new Date(quote.expiresAt);
   body.innerHTML = `
@@ -224,7 +257,7 @@ async function startBooking(leg, pax) {
       $('#book-err').innerHTML = `<div class="notice bad">${esc(err.message)}</div>`;
       if (['quote_expired', 'quote_stale', 'leg_unavailable'].includes(err.code)) {
         $('#book-err').insertAdjacentHTML('beforeend', '<button class="secondary small" id="requote" type="button" style="margin-top:8px">See current price</button>');
-        $('#requote').onclick = () => showLeg(leg.id);
+        $('#requote').onclick = () => showLeg(leg.id, pax);
       }
     }
   });
@@ -264,6 +297,7 @@ async function showBooking(id, email) {
       ${breakdown(b.lines, b.totalCents)}
       <div><h3>Passengers</h3>${b.passengers.map((p) => esc(p.name)).join('<br>')}</div>
       <div><h3>Timeline</h3><ol class="timeline">${b.history.map((h) => `<li><span><strong>${esc(h.status.replace(/_/g, ' '))}</strong> — ${esc(h.note)}<br><span class="faint">${esc(when(h.at))}</span></span></li>`).join('')}</ol></div>
+      ${b.operatorUpdates?.length ? `<div><h3>Operator updates</h3><ol class="timeline">${b.operatorUpdates.map((u) => `<li><span>${esc(u.text)}<br><span class="faint">${esc(when(u.at))}</span></span></li>`).join('')}</ol></div>` : ''}
       <p class="faint">Booking ${esc(b.id)} · agreement ${esc(b.agreement.version)} signed by ${esc(b.agreement.signedName)}</p>
       ${b.status === 'authorized' ? '<button class="danger" id="cancel">Cancel request</button>' : ''}`;
     $('#cancel')?.addEventListener('click', async () => {
@@ -278,7 +312,7 @@ async function showBooking(id, email) {
 
 function route() {
   const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get('leg')) showLeg(h.get('leg'));
+  if (h.get('leg')) showLeg(h.get('leg'), Number(h.get('pax')) || undefined);
   else if (h.get('booking')) showBooking(h.get('booking'), h.get('email') ?? '');
 }
 window.addEventListener('hashchange', route);

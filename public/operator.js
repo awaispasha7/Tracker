@@ -33,6 +33,7 @@ document.querySelector('.tabs').addEventListener('click', (e) => {
   document.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
   document.querySelectorAll('[data-panel]').forEach((p) => (p.hidden = p.dataset.panel !== b.dataset.tab));
   if (b.dataset.tab === 'legs') loadLegs();
+  if (b.dataset.tab === 'messages') loadThreads();
   if (b.dataset.tab === 'bookings') loadBookings();
 });
 
@@ -121,6 +122,41 @@ $('#post-one').addEventListener('submit', async (e) => {
 $('#post-csv').addEventListener('submit', async (e) => {
   e.preventDefault();
   try { showReport(await api('/api/operator/legs', { method: 'POST', key, raw: true, body: $('#csv').value, headers: { 'content-type': 'text/csv' } })); } catch (err) { toast(err.message); }
+});
+
+// ---------- messages ----------
+let openThread = null;
+async function loadThreads() {
+  const list = await api('/api/operator/threads', { key });
+  $('#threads').innerHTML = list.length ? list.map((t) => `
+    <div class="card thread-item ${t.id === openThread ? 'active' : ''}" data-thread="${esc(t.id)}">
+      <strong>${esc(t.subject)}</strong>
+      <span class="faint">${esc(t.lastMessage ?? '').slice(0, 90)}</span>
+      <span class="faint">${esc(when(t.updatedAt))}</span>
+    </div>`).join('') : '<div class="card empty">No conversations yet.</div>';
+}
+
+async function showThread(id) {
+  openThread = id;
+  const t = await api(`/api/operator/threads/${id}`, { key });
+  $('#thread').innerHTML = `
+    <h3>${esc(t.subject)}</h3>
+    <div class="msgs">${t.messages.map((m) => `<div class="msg ${m.direction === 'in' ? 'out' : 'in'}"><div class="faint">${esc(m.direction === 'in' ? 'You' : 'Empty Leg Tracker')} · ${esc(when(m.at))}</div>${esc(m.body)}</div>`).join('')}</div>
+    <form class="stack" id="reply"><textarea rows="3" placeholder="Write a reply…" required></textarea><button>Send</button></form>`;
+  $('#reply').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api(`/api/operator/threads/${id}/reply`, { method: 'POST', key, body: { body: e.target.querySelector('textarea').value } });
+      showThread(id);
+      loadThreads();
+    } catch (err) { toast(err.message); }
+  });
+  loadThreads();
+}
+
+$('#threads').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-thread]');
+  if (t) showThread(t.dataset.thread);
 });
 
 if (key) signIn(key).catch(() => sessionStorage.removeItem('opKey'));

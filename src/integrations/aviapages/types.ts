@@ -258,7 +258,8 @@ export interface CharterAircraft {
   year_of_production: number | null;
   aircraft_type: { id: number; name: string; icao: string | null; aircraft_class: { id: number; name: string } };
   company: { id: number; name: string; slug: string; contact_email?: string | null; phone?: string | null; website?: string | null };
-  base_airport: { id: number; icao: string | null; iata: string | null; name: string } | null;
+  aircraft_extension?: AvpAircraftExtension | null;
+  base_airport: { id: number; icao: string | null; iata: string | null; lid?: string | null; name: string; latitude?: number | null; longitude?: number | null; city?: { id: number; name: string } | null; country?: { iso_alpha2?: string | null } | null } | null;
   images: AvpImage[];
 }
 

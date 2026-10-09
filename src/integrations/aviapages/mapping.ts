@@ -7,7 +7,7 @@ import type { FleetRepo, ReferenceRepo } from '../../db/repos.ts';
 import { findAirport, registerAirport } from '../../reference/airports.ts';
 import { categoryFromClass, findAircraftType, matchTypeHint, registerAircraftType, typeCodeFor } from '../../reference/aircraft-types.ts';
 import { normalizeTail } from '../../domain/ids.ts';
-import type { AvpAirportRef, AvpEmptyLeg, AvpImage, QuoteReply } from './types.ts';
+import type { AircraftTypeRecord, AvpAirportRef, AvpEmptyLeg, AvpImage, CharterAircraft, CharterCompany, QuoteReply } from './types.ts';
 
 export const SOURCE_ID = 'aviapages';
 
@@ -178,4 +178,85 @@ export function registerFromReply(r: Registrar, reply: QuoteReply, fallbackBase:
     });
   }
   return { operatorId: existing && existing.source !== 'aviapages' ? existing.operatorId : operatorId, tail, typeCode: existing?.typeCode ?? typeCode };
+}
+
+// ---------- directory harvest (charter_companies, charter_aircraft, aircraft_types) ----------
+
+/** Operator directory entry: contact details and response statistics for outreach. */
+export function registerCompany(r: Registrar, c: CharterCompany): Operator | null {
+  if (!c.is_operator) return null;
+  const id = operatorIdFor(c.id);
+  const prior = r.fleet.getOperator(id);
+  const op: Operator = {
+    id,
+    name: c.name,
+    certificate: prior?.certificate ?? 'Aviapages network listing (AOC not yet verified by us)',
+    status: prior?.status ?? 'active',
+    source: prior?.source ?? 'aviapages',
+    externalId: String(c.id),
+    contact: {
+      ...prior?.contact,
+      email: c.contact_email ?? prior?.contact?.email ?? null,
+      phone: c.phone ?? prior?.contact?.phone ?? null,
+      website: c.website ?? prior?.contact?.website ?? null,
+      city: c.city?.name ?? prior?.contact?.city ?? null,
+      country: c.city?.country?.iso_alpha2 ?? prior?.contact?.country ?? null,
+      responseRate: c.company_extension?.avg_response_rate ?? prior?.contact?.responseRate ?? null,
+      responseTimeMin: c.company_extension?.avg_response_time ?? prior?.contact?.responseTimeMin ?? null,
+    },
+  };
+  r.fleet.upsertOperator(op);
+  return op;
+}
+
+/** Fleet directory entry. Directly-signed operators' tails are never reassigned. */
+export function registerCharterAircraft(r: Registrar, a: CharterAircraft): boolean {
+  const tail = normalizeTail(a.registration_number ?? '');
+  if (tail.length < 3) return false;
+  const existing = r.fleet.getAircraft(tail);
+  if (existing && existing.source !== 'aviapages') return false;
+  const typeCode = ensureAircraftType(r, a.aircraft_type.name, a.aircraft_type.icao, a.aircraft_type.aircraft_class?.name ?? null, a.passengers_max);
+  if (!typeCode) return false;
+  const base = a.base_airport ? ensureAirport(r, {
+    id: a.base_airport.id, icao: a.base_airport.icao, iata: a.base_airport.iata, lid: a.base_airport.lid ?? null, name: a.base_airport.name,
+    latitude: a.base_airport.latitude ?? null, longitude: a.base_airport.longitude ?? null,
+    city: a.base_airport.city ? { id: a.base_airport.city.id, name: a.base_airport.city.name, country: { id: 0, name: '', iso_alpha2: a.base_airport.country?.iso_alpha2 ?? null } } : null,
+  }) : null;
+  const operatorId = operatorIdFor(a.company.id);
+  if (!r.fleet.getOperator(operatorId)) {
+    r.fleet.upsertOperator({
+      id: operatorId, name: a.company.name, certificate: 'Aviapages network listing (AOC not yet verified by us)', status: 'active', source: 'aviapages',
+      externalId: String(a.company.id), contact: { email: a.company.contact_email ?? null, phone: a.company.phone ?? null, website: a.company.website ?? null },
+    });
+  }
+  const ext = a.aircraft_extension ?? null;
+  r.fleet.upsertAircraft({
+    tail, operatorId, typeCode,
+    seats: a.passengers_max ?? findAircraftType(typeCode)?.seats ?? 6,
+    homeBase: base?.icao ?? existing?.homeBase ?? '',
+    year: a.year_of_production ?? 0,
+    source: 'aviapages', externalId: String(a.id),
+    images: imageUrls(a.images),
+    amenities: ext ? Object.fromEntries((['wireless_internet', 'lavatory', 'cabin_crew', 'hot_meal', 'entertainment_system', 'pets_allowed'] as const)
+      .filter((k) => typeof ext[k] === 'boolean').map((k) => [k, ext[k] as boolean])) : {},
+  });
+  return true;
+}
+
+/**
+ * Aircraft type catalog: replaces class defaults with the type's own range, speed and seating for
+ * types we learned from feeds (curated types keep their figures).
+ */
+export function registerTypeRecord(r: Registrar, t: AircraftTypeRecord): string | null {
+  const category = categoryFromClass(t.class_name);
+  if (!category) return null;
+  const code = typeCodeFor(t.name, t.icao);
+  const existing = findAircraftType(code);
+  if (existing && existing.source !== 'feed') return existing.code;
+  const type = registerAircraftType({ code, name: t.name, category });
+  if (t.pax_maximum) type.seats = t.pax_maximum;
+  if (t.range_maximum) type.rangeNm = Math.round(t.range_maximum / 1.852);
+  if (t.speed_typical) type.cruiseKts = Math.round(t.speed_typical / 1.852);
+  r.reference.saveAircraftType(type);
+  return type.code;
 }

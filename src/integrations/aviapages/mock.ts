@@ -231,8 +231,10 @@ export class AviapagesMock {
 
   readonly fetch: FetchLike = async (url, init) => {
     const u = new URL(url);
-    const { status, body } = this.handle(init.method, u.pathname, u.searchParams, init.body ? JSON.parse(init.body) : undefined, init.headers.authorization ?? init.headers.Authorization);
-    this.calls.push({ method: init.method, path: u.pathname, status });
+    const prefix = new URL(this.baseUrl).pathname.replace(/\/$/, '');
+    const path = prefix && u.pathname.startsWith(prefix) ? u.pathname.slice(prefix.length) : u.pathname;
+    const { status, body } = this.handle(init.method, path, u.searchParams, init.body ? JSON.parse(init.body) : undefined, init.headers.authorization ?? init.headers.Authorization);
+    this.calls.push({ method: init.method, path, status });
     const text = body === undefined ? '' : JSON.stringify(body);
     return { status, headers: { get: (n: string) => (n.toLowerCase() === 'retry-after' && status === 429 ? '1' : null) }, text: async () => text };
   };

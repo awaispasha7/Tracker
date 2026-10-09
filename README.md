@@ -5,22 +5,30 @@ flights they already fly; travelers book the whole aircraft at one all-in price,
 below a regular one-way charter.
 
 ```
-npm install        # dev tooling only (TypeScript types) — there are no runtime dependencies
-npm start          # http://localhost:3000, seeded with a demo marketplace and a live feed simulator
-npm test           # 48 tests: adapters, reconciliation, pricing guardrails, search, booking & payments
+npm install                  # dev tooling only — there are no runtime dependencies
+npm start                    # http://localhost:3000 — demo marketplace + Aviapages in mock mode
+npm test                     # 95 unit/integration tests
+npm run e2e                  # 14 browser end-to-end flows against a fresh server (needs Chromium*)
 npm run typecheck
+
+AVIAPAGES_API_KEY=… npm run aviapages:check     # day-1 live check of your Aviapages key
+AVIAPAGES_API_KEY=… npm run aviapages:harvest   # download as much as your budget allows
+AVIAPAGES_API_KEY=… npm start                   # run on live Aviapages data
 ```
 
 Requires Node.js ≥ 22.18 (runs TypeScript natively and uses the built-in `node:sqlite`).
+\*E2E uses `playwright-core`: set `CHROMIUM_PATH`, or run `npx playwright install chromium` once.
 
 | Page | URL | Demo credentials |
 | --- | --- | --- |
 | Traveler site | `/` | — (test cards: `tok_visa`, `tok_decline`, `tok_capture_fail`) |
+| Custom charter quotes | `/charter` | — |
 | Operator portal | `/operator` | `dev_op_skyline`, `dev_op_coastal`, `dev_op_pacific`, `dev_op_alpine`, … |
-| Ops review | `/admin` | `dev_admin_key` (set `ADMIN_KEY` in any real deployment) |
+| Ops console | `/admin` | `dev_admin_key` (set `ADMIN_KEY` in any real deployment) |
 
 Environment: `PORT` (3000), `DB_PATH` (`data/emptylegs.db`), `ADMIN_KEY`, `SIMULATE=0` to turn off the
-demo feed simulator. Delete `data/` to reseed.
+demo feed simulator, plus the Aviapages settings in **[docs/AVIAPAGES.md](docs/AVIAPAGES.md)**.
+Delete `data/` to reseed.
 
 ## What it does
 
@@ -36,6 +44,20 @@ The four hard problems, and where each lives:
 Plus route alerts (`src/alerts/`) evaluated on every inventory change, delivered through a
 transactional outbox.
 
+### Aviapages integration (`src/integrations/aviapages/`, `src/comms/`, `src/charter/`)
+
+| Feature | What it does |
+| --- | --- |
+| Live empty legs | Budget-paced full + incremental sync; learns operators, tails, photos, amenities, airports and aircraft types from each listing; removed listings are withdrawn (and refunded if booked). |
+| Operator communication | Booking a network operator's leg sends them an Aviapages RFQ; delivery status and their offer are polled; an offer within the expected payout confirms and charges automatically, "not available" declines and releases the card, anything else goes to a human. Email in/out with `[ref:…]` threading and portal messages land in one Inbox. |
+| Better pricing inputs | Wind-adjusted airway flight times and market charter prices, cached per route + type. |
+| Custom charter | Traveler gives a route; Aviapages finds aircraft nearby; one RFQ to chosen operators; offers become privately bookable through the normal payment flow. |
+| Trial tooling | Per-endpoint monthly budgets with reserves, raw response archive, live contract check, harvest + JSON export. |
+
+Built against the official OpenAPI spec (vendored); the mock is validated against it in the test
+suite. See **[docs/AVIAPAGES.md](docs/AVIAPAGES.md)** for setup and the 14-day trial plan, and
+**[docs/FEATURE-CHECK.md](docs/FEATURE-CHECK.md)** for what was tested and how.
+
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the design: how truth is decided, the price
 waterfall and every guardrail, the booking state machine, and what changes for production.
 
@@ -49,17 +71,28 @@ Public
 - `GET  /api/bookings/:id?email=` · `POST /api/bookings/:id/cancel {email}`
 - `POST /api/alerts {email, from, to?, radiusNm?, pax?, maxPrice?, dateFrom?, dateTo?}`
 - `GET  /api/stream` — server-sent events when inventory changes
+- `GET  /api/config` — which integrations are enabled
+- `POST /api/charter-requests {name, email, phone?, from, to, date, time?, pax, notes?}` → aircraft options
+- `POST /api/charter-requests/:id/send {email, aircraftIds[]}` · `GET /api/charter-requests/:id?email=`
 
 Feeds (machine-to-machine, `Authorization: Bearer <feed key>`)
 - `POST /api/feeds/:sourceId` — JSON in the source's format, or `text/csv` for operator sources
 
 Operator portal (`Authorization: Bearer <operator key>`)
-- `GET /api/operator/me|legs|bookings` · `POST /api/operator/legs` (JSON or CSV)
+- `GET /api/operator/me|legs|bookings|threads` · `POST /api/operator/legs` (JSON or CSV)
+- `GET /api/operator/threads/:id` · `POST /api/operator/threads/:id/reply {body}`
 - `POST /api/operator/legs/:id/withdraw` · `POST /api/operator/bookings/:id/confirm|decline`
 
 Ops (`Authorization: Bearer <admin key>`)
 - `GET /api/admin/review|ingest-errors|notifications|ledger|sources`
 - `POST /api/admin/legs/:id/approve-price` · `POST /api/admin/market {fuelCentsPerGal, fx{EUR}}`
+- `GET /api/admin/bookings?status=` · `POST /api/admin/bookings/:id/confirm|decline` (on behalf of network operators)
+- `GET /api/admin/threads?attention=1` · `GET /api/admin/threads/:id` · `POST /api/admin/threads/:id/messages|retry|resolve`
+- `GET /api/admin/charter-requests` · `GET /api/admin/integrations`
+- `POST /api/admin/integrations/aviapages/sync {kind: full|incremental}` · `…/poll` · `…/check {includeWrites?}`
+
+Inbound email (`?token=$INBOUND_EMAIL_TOKEN`)
+- `POST /api/inbound/email {from, to?, subject?, text, messageId?}` — map your email provider's inbound webhook to this
 
 ### Pushing legs from an operator system
 
