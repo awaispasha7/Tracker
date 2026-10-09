@@ -5,11 +5,13 @@ import { Router, type Ctx } from './router.ts';
 import { AppError, CATEGORIES, DAY, type AircraftCategory, type Leg, type Operator } from '../domain/types.ts';
 import { searchAirports, getAirport } from '../reference/airports.ts';
 import { getAircraftType } from '../reference/aircraft-types.ts';
-import { AGREEMENT_HASH, AGREEMENT_TEXT, AGREEMENT_VERSION } from '../booking/agreement.ts';
+import { agreementFor } from '../booking/agreement.ts';
+import { loadSiteConfig, type SiteConfig } from '../site/config.ts';
 import { isListable } from '../inventory/search.ts';
 import { runContractCheck } from '../integrations/aviapages/contract-check.ts';
 
-export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: string }): Router {
+export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: string; site?: SiteConfig }): Router {
+  const site = opts.site ?? loadSiteConfig({});
   const r = new Router();
   const now = () => app.clock.now();
 
@@ -100,7 +102,7 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     };
   });
 
-  r.on('GET', '/api/agreement', () => ({ version: AGREEMENT_VERSION, hash: AGREEMENT_HASH, text: AGREEMENT_TEXT }));
+  r.on('GET', '/api/agreement', () => agreementFor(app.payments.kind));
 
   // ---------- public: booking ----------
   r.on('POST', '/api/quotes', async ({ body }) => {
@@ -130,6 +132,8 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     app.bookings.customerCancel(params.id, String((body as { email?: string })?.email ?? '')));
 
   r.on('GET', '/api/config', () => ({
+    site: { brand: site.brand, tagline: site.tagline, phone: site.phone, whatsapp: site.whatsapp, email: site.email, production: site.production },
+    payments: app.payments.kind,
     aviapages: app.aviapages ? { enabled: true, mode: app.aviapages.mode } : { enabled: false, mode: 'off' },
     charterQuotes: app.charters.enabled,
     skyaccess: app.skyaccess ? { enabled: true, mode: app.skyaccess.mode } : { enabled: false, mode: 'off' },

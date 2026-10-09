@@ -10,6 +10,8 @@ export type PaymentResult =
   | { ok: false; code: string; message: string };
 
 export interface PaymentProvider {
+  /** 'card' authorizes now and captures on confirmation; 'invoice' takes no payment online. */
+  readonly kind: 'card' | 'invoice';
   authorize(input: { amountCents: number; currency: string; token: string; description: string; idempotencyKey: string }): Promise<PaymentResult>;
   capture(intentId: string, idempotencyKey: string): Promise<PaymentResult>;
   void(intentId: string, idempotencyKey: string): Promise<PaymentResult>;
@@ -25,6 +27,7 @@ type IntentState = 'authorized' | 'captured' | 'voided' | 'refunded';
  *   tok_capture_fail    authorizes, then capture fails (auth expired)
  */
 export class MockPaymentProvider implements PaymentProvider {
+  readonly kind = 'card' as const;
   readonly intents = new Map<string, { amountCents: number; currency: string; token: string; state: IntentState; refundedCents: number }>();
   private seen = new Map<string, PaymentResult>();
 
@@ -74,5 +77,38 @@ export class MockPaymentProvider implements PaymentProvider {
       i.state = 'refunded';
       return { ok: true, intentId };
     });
+  }
+}
+
+/**
+ * Request-to-book without online payment, for launching before a card processor is in place. Each
+ * booking gets an invoice record instead of a card authorization: "capture" means the invoice is
+ * issued (ops collects by wire or payment link), "refund" means ops owes the traveler a refund.
+ * Every step is in the booking history and ledger, so nothing is lost when a processor is added.
+ */
+export class InvoicePaymentProvider implements PaymentProvider {
+  readonly kind = 'invoice' as const;
+  private intents = new Map<string, 'open' | 'issued' | 'voided' | 'refunded'>();
+
+  async authorize(input: { token: string; idempotencyKey: string }): Promise<PaymentResult> {
+    if (input.token !== 'invoice') return { ok: false, code: 'invalid_token', message: 'Online card payment is not available; request the flight and pay by invoice.' };
+    const id = `inv_${input.idempotencyKey.replace(/[^a-zA-Z0-9]/g, '').slice(0, 24) || newId('x')}`;
+    if (!this.intents.has(id)) this.intents.set(id, 'open');
+    return { ok: true, intentId: id };
+  }
+
+  async capture(intentId: string): Promise<PaymentResult> {
+    this.intents.set(intentId, 'issued');
+    return { ok: true, intentId };
+  }
+
+  async void(intentId: string): Promise<PaymentResult> {
+    this.intents.set(intentId, 'voided');
+    return { ok: true, intentId };
+  }
+
+  async refund(intentId: string): Promise<PaymentResult> {
+    this.intents.set(intentId, 'refunded');
+    return { ok: true, intentId };
   }
 }

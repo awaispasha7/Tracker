@@ -104,12 +104,22 @@ export function seedReference(app: App, now: number): Pick<SeedResult, 'operator
     app.fleet.upsertSource(source('brokernet', 'BrokerNet partner feed', 'broker_network', null, 'native'), 'dev_feed_brokernet');
     feedKeys.aerofeed = 'dev_feed_aerofeed';
     feedKeys.brokernet = 'dev_feed_brokernet';
-    app.market.set('fuel_cents_per_gal', 640, now);
-    app.market.set('fx_usd_per_EUR', 1.09, now);
-    app.market.set('fx_usd_per_GBP', 1.28, now);
-    app.market.set('fx_usd_per_CHF', 1.14, now);
+    seedMarketDefaults(app, now);
   });
   return { operatorKeys, feedKeys };
+}
+
+/**
+ * Fuel and FX inputs the pricing engine needs; production sets only these, never demo data.
+ * Keeps whatever ops last set (via /api/admin/market) and re-stamps it as current, so prices don't
+ * fail the MARKET_FRESH guardrail when no market feed is connected. Run at startup and periodically.
+ */
+export function seedMarketDefaults(app: App, now: number): void {
+  const set = (k: string, v: number) => app.market.set(k, app.market.get(k)?.value ?? v, now);
+  set('fuel_cents_per_gal', 640);
+  set('fx_usd_per_EUR', 1.09);
+  set('fx_usd_per_GBP', 1.28);
+  set('fx_usd_per_CHF', 1.14);
 }
 
 const NEARBY: Record<string, string> = { KTEB: 'KJFK', KVNY: 'KBUR', KPBI: 'KFLL', KOPF: 'KMIA', LFMN: 'LFMD', KDAL: 'KDAL' };

@@ -5,20 +5,30 @@ import { fileURLToPath } from 'node:url';
 import { createApp, type AviapagesOptions } from './app.ts';
 import { buildRouter } from './http/routes.ts';
 import { consoleSender } from './alerts/outbox.ts';
-import { DEV_ADMIN_KEY, seedDemo, generateSpecs, seedReference, startSimulator } from './dev/seed.ts';
+import { DEV_ADMIN_KEY, seedDemo, generateSpecs, seedReference, seedMarketDefaults, startSimulator } from './dev/seed.ts';
 import { AviapagesMock } from './integrations/aviapages/mock.ts';
 import { HOUR, MINUTE, systemClock } from './domain/types.ts';
+import { randomBytes } from 'node:crypto';
+import { loadSiteConfig } from './site/config.ts';
+import { InvoicePaymentProvider, MockPaymentProvider } from './booking/payments.ts';
+import { resendSender } from './alerts/email.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
+const SITE = loadSiteConfig();
+const PROD = SITE.production;
 const DB_PATH = process.env.DB_PATH ?? 'data/emptylegs.db';
-const ADMIN_KEY = process.env.ADMIN_KEY ?? DEV_ADMIN_KEY;
-const SIMULATE = process.env.SIMULATE !== '0';
-const INBOUND_TOKEN = process.env.INBOUND_EMAIL_TOKEN ?? 'dev_inbound_token';
+const ADMIN_KEY = process.env.ADMIN_KEY ?? (PROD ? '' : DEV_ADMIN_KEY);
+if (PROD && (ADMIN_KEY.length < 16 || ADMIN_KEY === DEV_ADMIN_KEY)) {
+  throw new Error('Production needs ADMIN_KEY set to a long random secret (16+ characters). Generate one with: openssl rand -hex 24');
+}
+// Production never runs the demo: no fake operators, legs, feeds, simulator or mocks.
+const SIMULATE = process.env.SIMULATE ? process.env.SIMULATE !== '0' : !PROD;
+const INBOUND_TOKEN = process.env.INBOUND_EMAIL_TOKEN ?? (PROD ? randomBytes(24).toString('hex') : 'dev_inbound_token');
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 
 // ---------- Aviapages: live with a key, otherwise a mock so every feature can be exercised ----------
 const AVP_KEY = process.env.AVIAPAGES_API_KEY ?? '';
-const AVP_MODE = (process.env.AVIAPAGES_MODE ?? (AVP_KEY ? 'live' : 'mock')) as AviapagesOptions['mode'];
+const AVP_MODE = (process.env.AVIAPAGES_MODE ?? (AVP_KEY ? 'live' : PROD ? 'off' : 'mock')) as AviapagesOptions['mode'];
 if (AVP_MODE === 'live' && !AVP_KEY) throw new Error('AVIAPAGES_MODE=live requires AVIAPAGES_API_KEY');
 const mock = AVP_MODE === 'mock'
   ? new AviapagesMock({ clock: systemClock, baseUrl: `http://localhost:${PORT}/mock-aviapages`, replyDelayMs: Number(process.env.AVIAPAGES_MOCK_REPLY_SECONDS ?? 90) * 1000 })
@@ -29,6 +39,7 @@ const minutes = (name: string, fallback: number) => (process.env[name] ? Number(
 
 const app = createApp({
   dbPath: DB_PATH,
+  payments: SITE.payments === 'invoice' ? new InvoicePaymentProvider() : new MockPaymentProvider(),
   aviapages: {
     mode: AVP_MODE,
     apiKey: AVP_KEY,
@@ -49,15 +60,24 @@ const app = createApp({
   },
 });
 
-const firstRun = app.fleet.listOperators().length === 0;
-const seeded = firstRun ? await seedDemo(app) : { ...seedReference(app, app.clock.now()), specs: generateSpecs(app.clock.now()) };
-if (firstRun) console.log(`Seeded demo marketplace into ${DB_PATH}`);
+let seeded = { operatorKeys: {} as Record<string, string>, specs: [] as ReturnType<typeof generateSpecs> };
+if (PROD) {
+  seedMarketDefaults(app, app.clock.now());
+} else {
+  const firstRun = app.fleet.listOperators().length === 0;
+  seeded = firstRun ? await seedDemo(app) : { ...seedReference(app, app.clock.now()), specs: generateSpecs(app.clock.now()) };
+  if (firstRun) console.log(`Seeded demo marketplace into ${DB_PATH}`);
+}
 if (app.aviapages) {
   const r = await app.aviapages.sync.tick();
   if (r) console.log(`Aviapages (${AVP_MODE}) ${r.kind} sync: ${r.received} listings, ${r.ingested} ingested${r.error ? `, error: ${r.error}` : ''}`);
 }
 
-const router = buildRouter(app, { adminKey: ADMIN_KEY, inboundToken: INBOUND_TOKEN });
+const router = buildRouter(app, { adminKey: ADMIN_KEY, inboundToken: INBOUND_TOKEN, site: SITE });
+const sender = process.env.RESEND_API_KEY
+  ? resendSender({ apiKey: process.env.RESEND_API_KEY, from: process.env.EMAIL_FROM ?? `${SITE.brand} <onboarding@resend.dev>`, opsEmail: process.env.OPS_EMAIL ?? SITE.email ?? undefined, replyTo: SITE.email ?? undefined }, app.fleet)
+  : consoleSender;
+if (PROD && !process.env.RESEND_API_KEY) console.warn('[email] RESEND_API_KEY is not set: emails are only logged, not sent.');
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -105,7 +125,8 @@ const every = (ms: number, name: string, fn: () => Promise<unknown>) => setInter
 const timers = [
   every(30_000, 'sweep', () => app.bookings.sweep()),
   every(60_000, 'refresh', () => app.ingest.refresh()),
-  every(5_000, 'outbox', () => app.outbox.drain(consoleSender, app.clock.now())),
+  every(6 * HOUR, 'market', async () => seedMarketDefaults(app, app.clock.now())),
+  every(5_000, 'outbox', () => app.outbox.drain(sender, app.clock.now())),
   every(60_000, 'aviapages-sync', async () => {
     const r = await app.aviapages?.sync.tick();
     if (r) console.log(`[aviapages] ${r.kind} sync: ${r.received} listings, ${r.ingested} ingested, ${r.removed} removed${r.error ? `, error: ${r.error}` : ''}`);
@@ -135,10 +156,11 @@ if (mock) {
 const stopSim = SIMULATE ? startSimulator(app, seeded.specs, 20_000) : () => {};
 
 server.listen(PORT, () => {
-  console.log(`\nEmpty-leg marketplace on http://localhost:${PORT}`);
+  console.log(`\n${SITE.brand} on http://localhost:${PORT}  (${PROD ? 'PRODUCTION' : 'development'}, public URL ${SITE.url})`);
+  console.log(`  payments         ${SITE.payments === 'invoice' ? 'request to book, pay by invoice' : 'test cards'}`);
   console.log(`  traveler site    http://localhost:${PORT}/`);
   console.log(`  custom charter   http://localhost:${PORT}/charter`);
-  console.log(`  operator portal  http://localhost:${PORT}/operator   (try key: ${seeded.operatorKeys.op_skyline})`);
+  console.log(`  operator portal  http://localhost:${PORT}/operator${PROD ? '' : `   (try key: ${seeded.operatorKeys.op_skyline})`}`);
   console.log(`  ops console      http://localhost:${PORT}/admin      (key: ${ADMIN_KEY === DEV_ADMIN_KEY ? DEV_ADMIN_KEY : '$ADMIN_KEY'})`);
   console.log(`  Aviapages        ${AVP_MODE}${AVP_MODE === 'mock' ? ' (set AVIAPAGES_API_KEY to go live)' : ''}`);
   console.log(`  SkyAccess        ${SKY_MODE}${SKY_MODE === 'live' ? ' (partner flights from mcp.skyaccess.com)' : ''}`);

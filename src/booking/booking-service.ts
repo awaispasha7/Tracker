@@ -26,7 +26,7 @@ import { AppError, HOUR } from '../domain/types.ts';
 import { newId } from '../domain/ids.ts';
 import { getAirport } from '../reference/airports.ts';
 import { getAircraftType } from '../reference/aircraft-types.ts';
-import { AGREEMENT_HASH, AGREEMENT_VERSION } from './agreement.ts';
+import { agreementFor } from './agreement.ts';
 
 export type BookingStatus =
   | 'pending' | 'authorized' | 'confirmed' | 'completed'
@@ -95,6 +95,26 @@ export interface CreateBookingInput {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+/** Traveler-facing wording that depends on how they pay. */
+const COPY = {
+  card: {
+    requested: (summary: string, pax: number, total: string) =>
+      `We've asked the operator to confirm ${summary} for ${pax} passenger(s). Your card is authorized for ${total} and will only be charged once the operator confirms.`,
+    confirmed: (total: string) =>
+      `Your flight is confirmed and ${total} has been charged. Reminder: empty legs can move or cancel if the operator's primary trip changes; keep a refundable backup until departure.`,
+    released: 'Your card authorization has been released; you have not been charged.',
+    refund: (ok: boolean, total: string) => (ok ? `A full refund of ${total} has been issued.` : 'Our team is processing your full refund.'),
+  },
+  invoice: {
+    requested: (summary: string, pax: number, total: string) =>
+      `We've asked the operator to confirm ${summary} for ${pax} passenger(s). No payment has been taken. Once the operator confirms, we'll send your invoice for ${total} with secure payment instructions.`,
+    confirmed: (total: string) =>
+      `The operator has confirmed your flight. Your invoice for ${total} follows separately; your seats are secured once payment is received. Reminder: empty legs can move or cancel if the operator's primary trip changes; keep a refundable backup until departure.`,
+    released: 'No payment was taken.',
+    refund: (_ok: boolean, total: string) => `Anything you have paid toward this flight (up to ${total}) will be refunded in full; our team will be in touch.`,
+  },
+};
+
 export class BookingService {
   private db: Database;
   private legs: LegRepo;
@@ -107,6 +127,14 @@ export class BookingService {
   private onInventoryChange: () => void;
   /** Set by the communications hub: asks the operator to confirm once the card is authorized. */
   hooks: { onAuthorized?: (bookingId: string) => Promise<void> | void } = {};
+
+  private get agreement() {
+    return agreementFor(this.payments.kind);
+  }
+
+  private get copy() {
+    return COPY[this.payments.kind];
+  }
 
   constructor(deps: {
     db: Database; legs: LegRepo; fleet: FleetRepo; pricing: PricingEngine; payments: PaymentProvider;
@@ -146,7 +174,7 @@ export class BookingService {
     return {
       quoteId: id, legId: leg.id, pax, totalCents: price.totalCents, currency: price.currency, lines: price.lines,
       savingsPct: price.savingsPct, fullCharterEstimateCents: price.fullCharterEstimateCents,
-      expiresAt: new Date(expiresAt).toISOString(), agreement: { version: AGREEMENT_VERSION, hash: AGREEMENT_HASH },
+      expiresAt: new Date(expiresAt).toISOString(), agreement: { version: this.agreement.version, hash: this.agreement.hash },
     };
   }
 
@@ -186,7 +214,7 @@ export class BookingService {
       const sla = external ? this.config.externalOperatorSlaMs : this.config.operatorConfirmSlaMs;
       const holdExpiresAt = Math.min(now + sla, leg.departEarliest - this.config.holdCutoffBeforeDepartureMs);
       const agreement = {
-        version: AGREEMENT_VERSION, hash: AGREEMENT_HASH, signedName: input.agreement.signedName.trim(),
+        version: this.agreement.version, hash: this.agreement.hash, signedName: input.agreement.signedName.trim(),
         acceptedAt: new Date(now).toISOString(), ip: input.meta?.ip ?? null, userAgent: input.meta?.userAgent ?? null,
       };
       this.db.run(
@@ -219,13 +247,13 @@ export class BookingService {
         return;
       }
       this.db.run('UPDATE bookings SET payment_intent_id = ? WHERE id = ?', auth.intentId, bookingId);
-      this.transition(bookingId, 'pending', 'authorized', later, 'card authorized; awaiting operator confirmation');
+      this.transition(bookingId, 'pending', 'authorized', later, `${this.payments.kind === 'invoice' ? 'request received, pay by invoice' : 'card authorized'}; awaiting operator confirmation`);
       const leg = this.legs.get(b.leg_id)!;
       const summary = legSummary(leg);
       this.outbox.enqueue({
         dedupeKey: `booking:${bookingId}:requested`, recipient: b.contact_email,
         subject: `Request received: ${summary}`,
-        body: `We've asked the operator to confirm ${summary} for ${b.pax} passenger(s). Your card is authorized for ${usd(b.total_cents)} and will only be charged once the operator confirms.`,
+        body: this.copy.requested(summary, b.pax, usd(b.total_cents)),
       }, later);
       if (this.fleet.getOperator(b.operator_id)?.source !== 'aviapages') {
         this.outbox.enqueue({
@@ -267,14 +295,14 @@ export class BookingService {
         }
         return;
       }
-      if (!this.transition(bookingId, 'authorized', 'confirmed', now, 'operator confirmed; payment captured')) return;
+      if (!this.transition(bookingId, 'authorized', 'confirmed', now, this.payments.kind === 'invoice' ? 'operator confirmed; invoice issued' : 'operator confirmed; payment captured')) return;
       this.legs.setCommerceStatus(b.leg_id, 'booked', now);
       this.post(bookingId, now, 1, 'capture');
       const leg = this.legs.get(b.leg_id)!;
       this.outbox.enqueue({
         dedupeKey: `booking:${bookingId}:confirmed`, recipient: b.contact_email,
         subject: `Confirmed: ${legSummary(leg)}`,
-        body: `Your flight is confirmed and ${usd(b.total_cents)} has been charged. Reminder: empty legs can move or cancel if the operator's primary trip changes; keep a refundable backup until departure.`,
+        body: this.copy.confirmed(usd(b.total_cents)),
       }, now);
     });
     this.onInventoryChange();
@@ -286,7 +314,7 @@ export class BookingService {
     const b = this.ownedBy(bookingId, operatorId);
     if (b.status !== 'authorized') throw new AppError(409, 'invalid_state', `Booking is ${b.status}`);
     await this.voidAndClose(b, 'declined', `operator declined: ${reason || 'no reason given'}`,
-      'The operator could not confirm your empty leg', 'Your card authorization has been released and you have not been charged.');
+      'The operator could not confirm your empty leg', this.copy.released);
     return this.view(bookingId);
   }
 
@@ -295,7 +323,7 @@ export class BookingService {
     if (b.status === 'confirmed') throw new AppError(409, 'non_refundable', 'Confirmed bookings are non-refundable when cancelled by the traveler (agreement clause 5)');
     if (b.status !== 'authorized') throw new AppError(409, 'invalid_state', `Booking is ${b.status}`);
     await this.voidAndClose(b, 'cancelled_by_customer', 'cancelled by traveler before confirmation',
-      'Your request has been cancelled', 'Your card authorization has been released; you have not been charged.');
+      'Your request has been cancelled', this.copy.released);
     return this.view(bookingId);
   }
 
@@ -308,7 +336,7 @@ export class BookingService {
     for (const b of active) {
       if (b.status === 'authorized') {
         await this.voidAndClose(b, 'cancelled_by_operator', 'operator withdrew the flight before confirming',
-          'Your empty leg is no longer available', 'The operator withdrew this flight. Your card authorization has been released; you have not been charged.');
+          'Your empty leg is no longer available', `The operator withdrew this flight. ${this.copy.released}`);
       } else {
         const refund = await this.payments.refund(b.payment_intent_id!, b.total_cents, `${b.id}:refund`);
         const now = this.clock.now();
@@ -320,7 +348,7 @@ export class BookingService {
           this.outbox.enqueue({
             dedupeKey: `booking:${b.id}:operator_cancelled`, recipient: b.contact_email,
             subject: 'Your empty-leg flight was cancelled by the operator',
-            body: `The operator's primary trip changed and this repositioning flight will no longer operate. ${refund.ok ? `A full refund of ${usd(b.total_cents)} has been issued.` : 'Our team is processing your full refund.'} If you held a backup ticket, now is the time to use it; we'll alert you to alternative empty legs on this route.`,
+            body: `The operator's primary trip changed and this repositioning flight will no longer operate. ${this.copy.refund(refund.ok, usd(b.total_cents))} If you held a backup ticket, now is the time to use it; we'll alert you to alternative empty legs on this route.`,
           }, now);
         });
       }
@@ -348,7 +376,7 @@ export class BookingService {
     const stale = this.db.all<BookingRow>(`SELECT * FROM bookings WHERE status = 'authorized' AND hold_expires_at <= ?`, now);
     for (const b of stale) {
       await this.voidAndClose(b, 'expired', 'operator did not confirm in time',
-        'Your empty-leg request expired', "The operator didn't confirm in time. Your card authorization has been released; you have not been charged.");
+        'Your empty-leg request expired', `The operator didn't confirm in time. ${this.copy.released}`);
     }
     const flown = this.db.all<{ id: string }>(
       `SELECT b.id FROM bookings b JOIN legs l ON l.id = b.leg_id WHERE b.status = 'confirmed' AND l.depart_latest + ? < ?`, 12 * HOUR, now,
@@ -439,7 +467,7 @@ export class BookingService {
       throw new AppError(400, 'bad_passengers', 'Every passenger needs a full name as on their travel document');
     }
     if (!input.agreement?.accepted || !input.agreement.signedName?.trim()) throw new AppError(400, 'agreement_required', 'You must accept and sign the charter agreement');
-    if (input.agreement.version !== AGREEMENT_VERSION) throw new AppError(409, 'agreement_outdated', 'The charter agreement has been updated; please review it again');
+    if (input.agreement.version !== this.agreement.version) throw new AppError(409, 'agreement_outdated', 'The charter agreement has been updated; please review it again');
     if (typeof input.paymentToken !== 'string' || !input.paymentToken) throw new AppError(400, 'payment_required', 'A payment method is required');
   }
 

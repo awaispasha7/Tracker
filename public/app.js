@@ -245,7 +245,7 @@ async function showLeg(legId, paxOverride) {
         ${leg.kind === 'charter_offer' ? '<p class="faint">Full charter offer from the operator, all-in.</p>'
           : `<p class="faint">A regular one-way charter on this aircraft is about ${money(d.price.fullCharterEstimateCents)}${d.price.fullCharterSource === 'aviapages' ? ' (market data)' : ''}. You save ${d.price.savingsPct}%.</p>`}
       </div>
-      ${d.operator?.confirmation === 'on_request' ? `<div class="notice info">We'll send your request to ${esc(d.operator.name)} the moment you book. Your card is only charged once they confirm, usually within a few hours.</div>` : ''}
+      ${d.operator?.confirmation === 'on_request' ? `<div class="notice info">We'll send your request to ${esc(d.operator.name)} the moment you book. ${(await config).payments === 'invoice' ? 'Nothing is payable until they confirm' : 'Your card is only charged once they confirm'}, usually within a few hours.</div>` : ''}
       ${leg.kind === 'charter_offer' ? '' : `<div class="notice warn">Empty legs follow the operator's primary trip. The time can shift within the window, or the flight can cancel (full refund). Keep a refundable backup.</div>`}
       <button id="get-quote">Continue to book</button>`
     : `<div class="notice bad">${d.unavailableReason === 'reserved' ? 'Someone has just requested this flight.' : 'This flight is not available to book right now.'}</div>`}
@@ -255,6 +255,7 @@ async function showLeg(legId, paxOverride) {
 
 async function startBooking(leg, pax) {
   const body = $('#drawer-body');
+  const invoice = (await config).payments === 'invoice';
   let quote, agreement;
   try {
     [quote, agreement] = await Promise.all([api('/api/quotes', { method: 'POST', body: { legId: leg.id, pax } }), api('/api/agreement')]);
@@ -274,19 +275,21 @@ async function startBooking(leg, pax) {
       <h3 style="margin:0">Passengers (name as on passport/ID)</h3>
       ${Array.from({ length: quote.pax }, (_, i) => `<label>Passenger ${i + 1}<input name="p${i}" required></label>`).join('')}
       <h3 style="margin:0">Payment</h3>
-      <label>Card (test mode)
+      ${invoice ? `<p class="faint" style="margin:0">No payment now. Once the operator confirms, we send your invoice with secure payment instructions. Your seats are secured when payment is received.</p>
+        <input type="hidden" name="token" value="invoice">`
+      : `<label>Card (test mode)
         <select name="token">
           <option value="tok_visa">Visa •••• 4242 — approves</option>
           <option value="tok_decline">Card that declines</option>
           <option value="tok_capture_fail">Card whose authorization expires</option>
         </select>
       </label>
-      <p class="faint" style="margin:0">Your card is authorized now and charged only when the operator confirms.</p>
+      <p class="faint" style="margin:0">Your card is authorized now and charged only when the operator confirms.</p>`}
       <h3 style="margin:0">Charter agreement</h3>
       <pre class="agreement">${esc(agreement.text)}</pre>
       <label class="check"><input type="checkbox" name="accept" required> I have read and accept the charter agreement (${esc(agreement.version)}).</label>
       <label>Sign by typing your full name<input name="sig" required></label>
-      <button type="submit">Request flight · ${money(quote.totalCents)}</button>
+      <button type="submit">${invoice ? 'Request this flight' : 'Request flight'} · ${money(quote.totalCents)}</button>
       <div id="book-err"></div>
     </form>`;
   const idem = crypto.randomUUID();
@@ -319,10 +322,18 @@ async function startBooking(leg, pax) {
   });
 }
 
-const STATUS = {
-  pending: ['info', 'Processing your request…'],
+const CARD_STATUS = {
   authorized: ['info', 'Requested — waiting for the operator to confirm. Your card is authorized, not charged.'],
   confirmed: ['good', "Confirmed. You're flying! Your card has been charged."],
+};
+const INVOICE_STATUS = {
+  authorized: ['info', 'Requested — waiting for the operator to confirm. No payment has been taken.'],
+  confirmed: ['good', 'Confirmed by the operator. Your invoice is on its way; your seats are secured once it is paid.'],
+  payment_failed: ['bad', 'We could not process this request. The flight has been released.'],
+};
+const STATUS = {
+  pending: ['info', 'Processing your request…'],
+  ...CARD_STATUS,
   completed: ['good', 'Flight completed.'],
   payment_failed: ['bad', 'Payment failed. The flight has been released.'],
   declined: ['bad', "The operator couldn't confirm. You have not been charged."],
@@ -343,7 +354,10 @@ async function showBooking(id, email) {
       stopPoll();
       return;
     }
-    const [tone, text] = STATUS[b.status] ?? ['info', b.status];
+    const statuses = (await config).payments === 'invoice' ? { ...STATUS, ...INVOICE_STATUS } : STATUS;
+    const released = (await config).payments === 'invoice' ? 'No payment was taken.' : 'You have not been charged.';
+    const [tone, raw] = statuses[b.status] ?? ['info', b.status];
+    const text = raw.replace('You have not been charged.', released).replace('Any payment has been refunded in full.', (await config).payments === 'invoice' ? 'Anything you paid will be refunded in full.' : 'Any payment has been refunded in full.');
     body.innerHTML = `
       <div class="notice ${tone}">${esc(text)}</div>
       <div>
