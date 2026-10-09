@@ -14,6 +14,9 @@ export interface Airport {
   lon: number;
   /** Drives landing/handling fees. Premium = busy business-aviation FBOs (TEB, VNY, LBG...). */
   feeTier: 'standard' | 'premium';
+  /** Absent for the curated seed list; 'feed' when learned from a data provider. */
+  source?: 'feed';
+  externalId?: string;
 }
 
 export interface AircraftType {
@@ -28,6 +31,8 @@ export interface AircraftType {
   fuelBurnGph: number;
   /** Alternate names third-party feeds use for this type; used to detect type mismatches. */
   aliases: string[];
+  /** Absent for curated types; 'feed' when learned from a provider with class-based performance defaults. */
+  source?: 'feed';
 }
 
 export interface Operator {
@@ -36,6 +41,26 @@ export interface Operator {
   /** e.g. "FAA Part 135", "EASA AOC". Only certificated operators may list legs. */
   certificate: string;
   status: 'active' | 'suspended';
+  /**
+   * 'direct' = signed with us, uses the operator portal/API, confirms bookings itself.
+   * 'aviapages' = known through the Aviapages network; we reach them by RFQ and email.
+   */
+  source?: 'direct' | 'aviapages';
+  externalId?: string | null;
+  contact?: OperatorContact;
+}
+
+export interface OperatorContact {
+  email?: string | null;
+  phone?: string | null;
+  website?: string | null;
+  city?: string | null;
+  country?: string | null;
+  /** 0..1 share of requests the operator answers, as reported by the network. */
+  responseRate?: number | null;
+  /** Average minutes to respond. */
+  responseTimeMin?: number | null;
+  validated?: boolean | null;
 }
 
 export interface Aircraft {
@@ -45,6 +70,10 @@ export interface Aircraft {
   seats: number;
   homeBase: string;
   year: number;
+  source?: 'direct' | 'aviapages';
+  externalId?: string | null;
+  images?: string[];
+  amenities?: Record<string, boolean | number | string>;
 }
 
 export type SourceKind = 'operator_api' | 'operator_portal' | 'aggregator' | 'broker_network';
@@ -60,9 +89,16 @@ export interface FeedSource {
   /** After this long without a refresh, a report from this source is no longer counted. */
   ttlMs: number;
   adapter: AdapterName;
+  /**
+   * True when prices on this source are posted by the operators themselves (an operator-run
+   * marketplace) rather than a reseller's retail price, so they can stand in for the operator's ask.
+   */
+  pricesAreNet?: boolean;
+  /** How long a listing confirmed by this source stays sellable (overrides the pricing default). */
+  listingMaxAgeMs?: number | null;
 }
 
-export type AdapterName = 'native' | 'aerofeed' | 'csv';
+export type AdapterName = 'native' | 'aerofeed' | 'csv' | 'aviapages';
 
 export type ObservedStatus = 'available' | 'unavailable';
 
@@ -80,6 +116,8 @@ export interface Observation {
   currency: string;
   status: ObservedStatus;
   typeHint: string | null;
+  /** Free-text remark attached to the listing, if the source has one. */
+  note?: string | null;
 }
 
 export type SupplyStatus = 'available' | 'withdrawn' | 'expired';
@@ -116,6 +154,14 @@ export interface Leg {
   lastSeenAt: number;
   lastPublishedPriceCents: number | null;
   updatedAt: number;
+  /** 'empty_leg' = repositioning supply; 'charter_offer' = a full-charter offer made for one traveler. */
+  kind?: 'empty_leg' | 'charter_offer';
+  /** Private legs (charter offers) never appear in search; only their requester can book them. */
+  visibility?: 'public' | 'private';
+  /** Free-text remark from the source (e.g. the operator's comment on the listing). */
+  note?: string | null;
+  /** Sellable for this long after lastSeenAt (set by the confirming source); else the pricing default. */
+  freshnessMs?: number | null;
 }
 
 export interface Clock {

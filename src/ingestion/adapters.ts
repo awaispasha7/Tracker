@@ -6,6 +6,9 @@ import type { AdapterName, Observation } from '../domain/types.ts';
 import { HOUR } from '../domain/types.ts';
 import { findAirport } from '../reference/airports.ts';
 import { normalizeTail } from '../domain/ids.ts';
+import type { AvpEmptyLeg } from '../integrations/aviapages/types.ts';
+import { parseAvpTime } from '../integrations/aviapages/client.ts';
+import { airportCode } from '../integrations/aviapages/mapping.ts';
 
 export interface IngestIssue {
   externalId: string | null;
@@ -44,11 +47,11 @@ function isoTime(v: unknown, field: string): number {
   return t;
 }
 
-function checkCommon(n: Normalized): Normalized {
+function checkCommon(n: Normalized, maxWindowMs = 72 * HOUR): Normalized {
   if (!n.tail || n.tail.length < 3) throw new RecordError('bad_tail', 'missing or invalid registration');
   if (n.fromIcao === n.toIcao) throw new RecordError('same_airport', 'origin and destination are the same');
   if (n.departLatest < n.departEarliest) throw new RecordError('bad_window', 'departure window ends before it starts');
-  if (n.departLatest - n.departEarliest > 72 * HOUR) throw new RecordError('bad_window', 'departure window wider than 72h');
+  if (n.departLatest - n.departEarliest > maxWindowMs) throw new RecordError('bad_window', `departure window wider than ${maxWindowMs / HOUR}h`);
   if (n.askCents !== null && (!Number.isInteger(n.askCents) || n.askCents <= 0)) {
     throw new RecordError('bad_price', 'price must be a positive integer amount in minor units');
   }
@@ -186,6 +189,41 @@ function csvRecord(r: Record<string, string>, index: number): Normalized {
   });
 }
 
+// ---------- aviapages: operator-posted availability from the Aviapages marketplace ----------
+// Airports, types and tails are registered by the sync before records reach this adapter.
+
+function aviapagesRecord(r: AvpEmptyLeg): Normalized {
+  if (typeof r.id !== 'number') throw new RecordError('missing_id', 'id is required');
+  if (!r.arr_airport) throw new RecordError('no_destination', 'open-destination availability is not an empty leg we can sell');
+  const from = airportCode(r.dep_airport);
+  const to = airportCode(r.arr_airport);
+  const earliest = parseAvpTime(r.from_date_utc);
+  const latest = parseAvpTime(r.to_date_utc);
+  if (Number.isNaN(earliest) || Number.isNaN(latest)) throw new RecordError('bad_time', 'from_date_utc/to_date_utc unparseable');
+  let askCents: number | null = null;
+  let currency = (r.currency_code ?? 'USD').toUpperCase();
+  if (typeof r.price === 'number' && r.price > 0) {
+    if (r.currency_code) askCents = Math.round(r.price * 100);
+    else if (typeof r.converted_prices?.usd === 'number') {
+      askCents = Math.round(r.converted_prices.usd * 100);
+      currency = 'USD';
+    }
+  }
+  return checkCommon({
+    externalId: String(r.id),
+    tail: normalizeTail(r.aircraft?.registration_number ?? r.registration_number ?? ''),
+    fromIcao: airport(from, 'dep_airport'),
+    toIcao: airport(to, 'arr_airport'),
+    departEarliest: earliest,
+    departLatest: Math.max(earliest, latest),
+    askCents,
+    currency,
+    status: 'available',
+    typeHint: r.aircraft_type_details?.icao ?? r.aircraft_type,
+    note: r.comment,
+  }, 10 * 24 * HOUR);
+}
+
 // ---------- dispatcher ----------
 
 export function runAdapter(adapter: AdapterName, payload: unknown, sourceId: string, receivedAt: number): AdapterResult {
@@ -199,8 +237,9 @@ export function runAdapter(adapter: AdapterName, payload: unknown, sourceId: str
     records = parseCsv(payload);
   } else {
     const p = payload as { legs?: unknown; flights?: unknown } | unknown[];
-    records = Array.isArray(p) ? p : Array.isArray(p?.legs) ? p.legs : Array.isArray(p?.flights) ? p.flights : [];
-    if (records.length === 0 && !Array.isArray(p) && !Array.isArray(p?.legs) && !Array.isArray(p?.flights)) {
+    const pr = p as { legs?: unknown; flights?: unknown; results?: unknown } | unknown[];
+    records = Array.isArray(pr) ? pr : Array.isArray(pr?.legs) ? pr.legs : Array.isArray(pr?.flights) ? pr.flights : Array.isArray(pr?.results) ? pr.results : [];
+    if (records.length === 0 && !Array.isArray(pr) && !Array.isArray(pr?.legs) && !Array.isArray(pr?.flights) && !Array.isArray(pr?.results)) {
       result.issues.push({ externalId: null, code: 'bad_payload', message: 'expected an array of records (or {legs|flights: [...]})', raw: payload });
       return result;
     }
@@ -209,6 +248,8 @@ export function runAdapter(adapter: AdapterName, payload: unknown, sourceId: str
     try {
       const n = adapter === 'aerofeed'
         ? aerofeedRecord(rec as AeroFeedRecord)
+        : adapter === 'aviapages'
+          ? aviapagesRecord(rec as AvpEmptyLeg)
         : adapter === 'csv'
           ? csvRecord(rec as Record<string, string>, i)
           : nativeRecord(rec as NativeRecord);

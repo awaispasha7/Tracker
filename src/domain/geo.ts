@@ -14,6 +14,8 @@ export interface FlightEstimate {
   distanceNm: number;
   fuelStops: number;
   blockHours: number;
+  /** 'aviapages' = airway route with historical winds from the provider; absent = our great-circle estimate. */
+  source?: 'aviapages' | 'estimate';
 }
 
 /**
@@ -25,5 +27,5 @@ export function estimateFlight(from: Airport, to: Airport, type: AircraftType): 
   const usableRange = type.rangeNm * 0.9;
   const fuelStops = Math.max(0, Math.ceil(d / usableRange) - 1);
   const blockHours = d / (type.cruiseKts * 0.88) + 0.3 + fuelStops * 0.75;
-  return { distanceNm: Math.round(d), fuelStops, blockHours: Math.round(blockHours * 100) / 100 };
+  return { distanceNm: Math.round(d), fuelStops, blockHours: Math.round(blockHours * 100) / 100, source: 'estimate' };
 }

@@ -160,6 +160,123 @@ CREATE TABLE IF NOT EXISTS alerts (
   created_at INTEGER NOT NULL
 );
 
+-- Reference data learned at runtime (the curated lists in src/reference are only seeds).
+CREATE TABLE IF NOT EXISTS ref_airports (
+  icao TEXT PRIMARY KEY,
+  data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ref_aircraft_types (
+  code TEXT PRIMARY KEY,
+  data TEXT NOT NULL
+);
+
+-- Third-party API accounting: calls per endpoint per month, against a budget.
+CREATE TABLE IF NOT EXISTS api_usage (
+  provider TEXT NOT NULL,
+  month TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  calls INTEGER NOT NULL DEFAULT 0,
+  errors INTEGER NOT NULL DEFAULT 0,
+  last_status INTEGER,
+  last_at INTEGER,
+  PRIMARY KEY (provider, month, endpoint)
+);
+
+-- Every raw response we pay for is kept, so data outlives a trial and can be replayed offline.
+CREATE TABLE IF NOT EXISTS api_archive (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  method TEXT NOT NULL,
+  request TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  body TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS api_archive_by_endpoint ON api_archive(provider, endpoint, fetched_at);
+
+CREATE TABLE IF NOT EXISTS kv (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+-- Cached third-party calculations (flight time, market price), keyed by route + aircraft.
+CREATE TABLE IF NOT EXISTS calc_cache (
+  key TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL
+);
+
+-- Operator communications: one thread per (subject, operator); messages in both directions on any channel.
+CREATE TABLE IF NOT EXISTS threads (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  operator_id TEXT,
+  booking_id TEXT,
+  charter_request_id TEXT,
+  external_ref TEXT,
+  subject TEXT NOT NULL,
+  status TEXT NOT NULL,
+  needs_attention INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS threads_by_operator ON threads(operator_id, updated_at);
+CREATE INDEX IF NOT EXISTS threads_by_booking ON threads(booking_id);
+CREATE INDEX IF NOT EXISTS threads_by_ref ON threads(external_ref);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id TEXT NOT NULL,
+  direction TEXT NOT NULL,
+  channel TEXT NOT NULL,
+  author TEXT NOT NULL,
+  body TEXT NOT NULL,
+  price_cents INTEGER,
+  currency TEXT,
+  external_id TEXT UNIQUE,
+  delivery_status TEXT,
+  meta TEXT NOT NULL DEFAULT '{}',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS messages_by_thread ON messages(thread_id, id);
+
+-- Custom charter requests (a route with no matching empty leg) and the offers operators send back.
+CREATE TABLE IF NOT EXISTS charter_requests (
+  id TEXT PRIMARY KEY,
+  contact_name TEXT NOT NULL,
+  contact_email TEXT NOT NULL,
+  contact_phone TEXT,
+  from_icao TEXT NOT NULL,
+  to_icao TEXT NOT NULL,
+  depart_at INTEGER NOT NULL,
+  pax INTEGER NOT NULL,
+  notes TEXT,
+  status TEXT NOT NULL,
+  options TEXT NOT NULL DEFAULT '[]',
+  external_ref TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS charter_offers (
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL,
+  external_id TEXT UNIQUE,
+  operator_id TEXT NOT NULL,
+  tail TEXT NOT NULL,
+  type_code TEXT NOT NULL,
+  seats INTEGER NOT NULL,
+  operator_price_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  comment TEXT,
+  state TEXT NOT NULL,
+  leg_id TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS charter_offers_by_request ON charter_offers(request_id);
+
 -- Transactional outbox: written in the same transaction as the state change, delivered later.
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -182,6 +299,30 @@ export class Database {
     this.raw = new DatabaseSync(path);
     this.raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
     this.raw.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /** Additive column migrations for databases created by earlier versions. */
+  private migrate(): void {
+    const add = (table: string, column: string, ddl: string) => {
+      const cols = this.raw.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+      if (!cols.some((c) => c.name === column)) this.raw.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+    };
+    add('operators', 'source', "TEXT NOT NULL DEFAULT 'direct'");
+    add('operators', 'external_id', 'TEXT');
+    add('operators', 'contact', "TEXT NOT NULL DEFAULT '{}'");
+    add('aircraft', 'source', "TEXT NOT NULL DEFAULT 'direct'");
+    add('aircraft', 'external_id', 'TEXT');
+    add('aircraft', 'images', "TEXT NOT NULL DEFAULT '[]'");
+    add('aircraft', 'amenities', "TEXT NOT NULL DEFAULT '{}'");
+    add('legs', 'kind', "TEXT NOT NULL DEFAULT 'empty_leg'");
+    add('legs', 'visibility', "TEXT NOT NULL DEFAULT 'public'");
+    add('legs', 'note', 'TEXT');
+    add('legs', 'freshness_ms', 'INTEGER');
+    add('observations', 'note', 'TEXT');
+    add('feed_sources', 'prices_are_net', 'INTEGER NOT NULL DEFAULT 0');
+    add('feed_sources', 'listing_max_age_ms', 'INTEGER');
+    this.raw.exec('CREATE UNIQUE INDEX IF NOT EXISTS operators_by_external ON operators(external_id) WHERE external_id IS NOT NULL');
   }
 
   all<T>(sql: string, ...params: SqlParam[]): T[] {

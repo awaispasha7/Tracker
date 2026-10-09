@@ -96,6 +96,27 @@ export class IngestService {
     return { updated: effects.updated };
   }
 
+  /**
+   * A source stopped listing these records (e.g. they vanished from a complete full sync). Recorded
+   * as fresh "unavailable" reports from that source, so reconciliation decides what it means.
+   */
+  async markUnavailable(sourceId: string, externalIds: string[]): Promise<{ updated: number }> {
+    const now = this.clock.now();
+    const touched = new Set<string>();
+    this.db.tx(() => {
+      for (const externalId of externalIds) {
+        const last = this.legs.latestObservation(sourceId, externalId);
+        const legId = this.legs.linkedLegId(sourceId, externalId);
+        if (!last || !legId || last.status === 'unavailable') continue;
+        this.legs.insertObservation({ ...last, receivedAt: now, status: 'unavailable' }, { removedFromSource: true });
+        touched.add(legId);
+      }
+    });
+    const effects = this.reconcileLegs(touched, now);
+    await this.applyEffects(effects);
+    return { updated: effects.updated };
+  }
+
   /** Operator cancels one of its legs from the portal: recorded as an authoritative observation. */
   async operatorWithdraw(operatorId: string, legId: string): Promise<Leg> {
     const leg = this.legs.get(legId);

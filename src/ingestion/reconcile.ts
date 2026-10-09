@@ -288,7 +288,18 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
       });
     }
   } else {
-    provenance.price = 'rate-model';
+    // No operator channel: an operator-run marketplace (prices posted by operators themselves) is
+    // the next best thing. A reseller's retail price never is.
+    const posted = weighted
+      .filter((w) => w.source.pricesAreNet && w.obs.askCents !== null && w.obs.status === 'available')
+      .sort((a, b) => b.weight - a.weight)[0];
+    if (posted) {
+      askCents = posted.obs.askCents;
+      currency = posted.obs.currency;
+      provenance.price = posted.source.id;
+    } else {
+      provenance.price = 'rate-model';
+    }
   }
 
   // ---- physical sanity ----
@@ -316,8 +327,15 @@ export function reconcile(input: ReconcileInput): ReconcileOutput {
   if (authority) confidence = Math.max(confidence, authority.weight);
   confidence = Math.round(confidence * 1000) / 1000;
 
+  // A listing stays sellable as long as the most lenient confirming source allows.
+  const allowances = supporters.map((w) => w.source.listingMaxAgeMs).filter((x): x is number => typeof x === 'number');
+  const freshnessMs = allowances.length > 0 ? Math.max(...allowances) : null;
+  const note = [...weighted].sort((a, b) => b.obs.receivedAt - a.obs.receivedAt).find((w) => w.obs.note)?.obs.note ?? null;
+
   const leg: Leg = {
     ...base,
+    freshnessMs,
+    note,
     operatorId,
     typeCode,
     fromIcao,

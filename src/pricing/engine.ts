@@ -43,6 +43,7 @@ export interface PriceResult {
   taxCents: number;
   netMarginCents: number;
   fullCharterEstimateCents: number;
+  fullCharterSource: 'aviapages' | 'model';
   savingsPct: number;
   basis: 'operator_ask' | 'rate_model';
   flight: FlightEstimate | null;
@@ -60,9 +61,16 @@ export interface PriceInput {
 
 const round = (n: number) => Math.round(n);
 
+/** Better inputs from a data provider, read from cache (pricing never waits on the network). */
+export interface PricingInsights {
+  flightEstimate(fromIcao: string, toIcao: string, typeCode: string): FlightEstimate | undefined;
+  marketPrice(fromIcao: string, toIcao: string, typeCode: string): { priceCents: number } | undefined;
+}
+
 export class PricingEngine {
   private market: MarketRepo;
   readonly config: PricingConfig;
+  insights: PricingInsights | null = null;
 
   constructor(market: MarketRepo, config: PricingConfig) {
     this.market = market;
@@ -81,7 +89,8 @@ export class PricingEngine {
     check('LEG_AVAILABLE', leg.supplyStatus === 'available', `supply status is ${leg.supplyStatus}`);
     check('LEG_UNCONFLICTED', blocking.length === 0, `unresolved conflicts: ${blocking.map((c) => c.code).join(', ') || 'none'}`);
     check('LEG_CONFIDENCE', leg.confidence >= cfg.minConfidence, `confidence ${leg.confidence} (min ${cfg.minConfidence})`);
-    check('LEG_FRESH', now - leg.lastSeenAt <= cfg.maxLegAgeMs, `last confirmed ${Math.round((now - leg.lastSeenAt) / 60000)} min ago`);
+    const maxAge = leg.freshnessMs ?? cfg.maxLegAgeMs;
+    check('LEG_FRESH', now - leg.lastSeenAt <= maxAge, `last confirmed ${Math.round((now - leg.lastSeenAt) / 60000)} min ago (max ${Math.round(maxAge / 60000)})`);
     check('LEAD_TIME', leg.departLatest - now >= cfg.minLeadTimeMs, 'departs too soon to confirm with the operator');
     check('CAPACITY', pax >= 1 && pax <= seats, `${pax} passengers, ${seats} seats`);
 
@@ -92,7 +101,7 @@ export class PricingEngine {
     const type = getAircraftType(leg.typeCode);
     const from = getAirport(leg.fromIcao);
     const to = getAirport(leg.toIcao);
-    const flight = estimateFlight(from, to, type);
+    const flight = this.insights?.flightEstimate(leg.fromIcao, leg.toIcao, type.code) ?? estimateFlight(from, to, type);
     const hoursOut = Math.max(0, (leg.departEarliest - now) / HOUR);
     const billableHours = Math.max(flight.blockHours, cfg.minBillableHours);
 
@@ -130,7 +139,11 @@ export class PricingEngine {
     }
 
     // ---- what the same trip costs as a regular one-way charter ----
-    const fullCharter = round(type.hourlyRateCents * billableHours) + fuelSurcharge + handling;
+    const market = this.insights?.marketPrice(leg.fromIcao, leg.toIcao, type.code);
+    const modelledFullCharter = round(type.hourlyRateCents * billableHours) + fuelSurcharge + handling;
+    // A provider's market price for this route and class beats our per-hour model; it is pre-tax.
+    const fullCharter = market ? market.priceCents : modelledFullCharter;
+    const fullCharterSource: PriceResult['fullCharterSource'] = market ? 'aviapages' : 'model';
 
     const usDomestic = from.country === 'US' && to.country === 'US';
     const touchesUs = from.country === 'US' || to.country === 'US';
@@ -153,7 +166,7 @@ export class PricingEngine {
     // Margin compression: rather than lose the "well below full charter" promise, give up margin,
     // but never below break-even. If that still isn't enough the leg simply isn't a deal.
     const ceiling = round(fullCharter * cfg.fullCharterCeilingRatio);
-    if (operatorPayout + platformFee > ceiling) {
+    if (leg.kind !== 'charter_offer' && operatorPayout + platformFee > ceiling) {
       const room = ceiling - operatorPayout;
       if (room >= minFee) {
         notes.push(`margin compressed from ${platformFee} to ${room} to stay under full-charter ceiling`);
@@ -161,7 +174,9 @@ export class PricingEngine {
       }
     }
     const transport = operatorPayout + platformFee;
-    check('FULL_CHARTER_CEILING', transport <= ceiling,
+    // A charter offer *is* a full charter: the "below full charter" promise doesn't apply to it.
+    const isOffer = leg.kind === 'charter_offer';
+    check('FULL_CHARTER_CEILING', isOffer || transport <= ceiling,
       `pre-tax ${transport} vs ceiling ${ceiling} (${Math.round(cfg.fullCharterCeilingRatio * 100)}% of full charter ${fullCharter})`);
     lines.push({ code: 'platform_fee', label: 'Booking & service fee', amountCents: platformFee, payee: 'platform' });
 
@@ -205,7 +220,8 @@ export class PricingEngine {
       taxCents: tax,
       netMarginCents: netMargin,
       fullCharterEstimateCents: fullCharter + (usDomestic ? round((fullCharter * cfg.fetBps) / 10_000) : 0),
-      savingsPct: Math.max(0, Math.round((1 - transport / fullCharter) * 100)),
+      fullCharterSource,
+      savingsPct: isOffer ? 0 : Math.max(0, Math.round((1 - transport / fullCharter) * 100)),
       basis,
       flight,
       guardrails: checks,
@@ -217,7 +233,7 @@ export class PricingEngine {
   private fail(checks: GuardrailResult[], notes: string[]): PriceResult {
     return {
       ok: false, currency: 'USD', totalCents: 0, lines: [], operatorPayoutCents: 0, platformFeeCents: 0, taxCents: 0,
-      netMarginCents: 0, fullCharterEstimateCents: 0, savingsPct: 0, basis: 'rate_model', flight: null,
+      netMarginCents: 0, fullCharterEstimateCents: 0, fullCharterSource: 'model', savingsPct: 0, basis: 'rate_model', flight: null,
       guardrails: checks, failures: checks.filter((c) => !c.ok), notes,
     };
   }

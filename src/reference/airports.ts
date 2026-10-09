@@ -76,11 +76,35 @@ export const AIRPORTS: Airport[] = ROWS.map(([icao, iata, name, city, country, l
 const byIcao = new Map(AIRPORTS.map((a) => [a.icao, a]));
 const byIata = new Map(AIRPORTS.map((a) => [a.iata, a]));
 
-/** Resolve an ICAO or IATA code. Returns undefined for unknown codes. */
+/**
+ * Adds (or updates) an airport learned at runtime, e.g. from a feed. The built-in list above is
+ * only a seed: real feeds reference thousands of airports. `icao` is the key; airports without an
+ * ICAO code use their local identifier (FAA LID) in that slot.
+ */
+export function registerAirport(a: Airport): Airport {
+  const key = a.icao.toUpperCase();
+  const existing = byIcao.get(key);
+  if (existing) {
+    // Never let a feed overwrite curated data; only fill gaps.
+    if (!existing.iata && a.iata) {
+      existing.iata = a.iata.toUpperCase();
+      byIata.set(existing.iata, existing);
+    }
+    return existing;
+  }
+  const airport: Airport = { ...a, icao: key, iata: (a.iata ?? '').toUpperCase() };
+  AIRPORTS.push(airport);
+  byIcao.set(key, airport);
+  if (airport.iata && !byIata.has(airport.iata)) byIata.set(airport.iata, airport);
+  return airport;
+}
+
+/** Resolve an ICAO, IATA or local identifier. Returns undefined for unknown codes. */
 export function findAirport(code: string | null | undefined): Airport | undefined {
   if (!code) return undefined;
   const c = code.trim().toUpperCase();
-  return c.length === 4 ? byIcao.get(c) : byIata.get(c);
+  if (!c) return undefined;
+  return c.length === 4 ? byIcao.get(c) ?? byIata.get(c) : byIata.get(c) ?? byIcao.get(c);
 }
 
 export function getAirport(icao: string): Airport {
@@ -98,7 +122,8 @@ export function searchAirports(q: string, limit = 8): Airport[] {
     if (a.iata.toLowerCase() === needle || a.icao.toLowerCase() === needle) s = 100;
     else if (a.city.toLowerCase().startsWith(needle)) s = 60;
     else if (a.name.toLowerCase().includes(needle) || a.city.toLowerCase().includes(needle)) s = 30;
-    if (s > 0) scored.push([s, a]);
+    // Curated airports first among equals: they're the ones with business-aviation fee data.
+    if (s > 0) scored.push([s + (a.source === 'feed' ? 0 : 1), a]);
   }
   return scored.sort((x, y) => y[0] - x[0]).slice(0, limit).map(([, a]) => a);
 }

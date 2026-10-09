@@ -66,7 +66,7 @@ export interface SearchResult {
 }
 
 export function isListable(leg: Leg, minConfidence: number): boolean {
-  return leg.supplyStatus === 'available' && leg.commerceStatus === 'open' &&
+  return leg.supplyStatus === 'available' && leg.commerceStatus === 'open' && (leg.visibility ?? 'public') === 'public' &&
     leg.confidence >= minConfidence && !leg.conflicts.some((c) => c.blocking);
 }
 

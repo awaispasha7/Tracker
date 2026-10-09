@@ -47,12 +47,15 @@ const TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
 export interface BookingConfig {
   /** How long an operator has to confirm before the hold lapses. */
   operatorConfirmSlaMs: number;
+  /** Network operators answer RFQs by email, so they get longer to confirm than signed operators. */
+  externalOperatorSlaMs: number;
   /** Holds also lapse this long before departure, so the operator isn't asked too late. */
   holdCutoffBeforeDepartureMs: number;
 }
 
 export const DEFAULT_BOOKING: BookingConfig = {
   operatorConfirmSlaMs: 2 * HOUR,
+  externalOperatorSlaMs: 6 * HOUR,
   holdCutoffBeforeDepartureMs: 2 * HOUR,
 };
 
@@ -102,6 +105,8 @@ export class BookingService {
   private clock: Clock;
   private config: BookingConfig;
   private onInventoryChange: () => void;
+  /** Set by the communications hub: asks the operator to confirm once the card is authorized. */
+  hooks: { onAuthorized?: (bookingId: string) => Promise<void> | void } = {};
 
   constructor(deps: {
     db: Database; legs: LegRepo; fleet: FleetRepo; pricing: PricingEngine; payments: PaymentProvider;
@@ -177,7 +182,9 @@ export class BookingService {
       }
       const breakdown = JSON.parse(quote.breakdown) as { operatorPayoutCents: number; platformFeeCents: number; taxCents: number };
       const id = newId('bk');
-      const holdExpiresAt = Math.min(now + this.config.operatorConfirmSlaMs, leg.departEarliest - this.config.holdCutoffBeforeDepartureMs);
+      const external = this.fleet.getOperator(leg.operatorId!)?.source === 'aviapages';
+      const sla = external ? this.config.externalOperatorSlaMs : this.config.operatorConfirmSlaMs;
+      const holdExpiresAt = Math.min(now + sla, leg.departEarliest - this.config.holdCutoffBeforeDepartureMs);
       const agreement = {
         version: AGREEMENT_VERSION, hash: AGREEMENT_HASH, signedName: input.agreement.signedName.trim(),
         acceptedAt: new Date(now).toISOString(), ip: input.meta?.ip ?? null, userAgent: input.meta?.userAgent ?? null,
@@ -220,15 +227,24 @@ export class BookingService {
         subject: `Request received: ${summary}`,
         body: `We've asked the operator to confirm ${summary} for ${b.pax} passenger(s). Your card is authorized for ${usd(b.total_cents)} and will only be charged once the operator confirms.`,
       }, later);
-      this.outbox.enqueue({
-        dedupeKey: `booking:${bookingId}:operator_request`, recipient: `operator:${b.operator_id}`,
-        subject: `Confirm booking ${bookingId}: ${summary}`,
-        body: `A traveler has requested your empty leg ${summary} (${leg.tail}). Payout ${usd(b.operator_payout_cents)}. Confirm or decline before ${new Date(b.hold_expires_at!).toISOString()}.`,
-      }, later);
+      if (this.fleet.getOperator(b.operator_id)?.source !== 'aviapages') {
+        this.outbox.enqueue({
+          dedupeKey: `booking:${bookingId}:operator_request`, recipient: `operator:${b.operator_id}`,
+          subject: `Confirm booking ${bookingId}: ${summary}`,
+          body: `A traveler has requested your empty leg ${summary} (${leg.tail}). Payout ${usd(b.operator_payout_cents)}. Confirm or decline before ${new Date(b.hold_expires_at!).toISOString()}.`,
+        }, later);
+      }
     });
     if (!auth.ok) {
       this.onInventoryChange();
       throw new AppError(402, auth.code, auth.message, { bookingId });
+    }
+    // Ask the operator to confirm (portal notice, or an RFQ through the operator's network). A
+    // failure here must not undo a valid booking: the hold stands and ops can retry.
+    try {
+      await this.hooks.onAuthorized?.(bookingId);
+    } catch (e) {
+      console.error(`[booking] operator request for ${bookingId} failed:`, e);
     }
     return this.view(bookingId);
   }
@@ -377,6 +393,30 @@ export class BookingService {
   viewForCustomer(bookingId: string, email: string) {
     this.forCustomer(bookingId, email);
     return this.view(bookingId);
+  }
+
+  /** Ops view: every booking, newest first, optionally filtered by status. */
+  listAll(status?: string) {
+    const rows = status
+      ? this.db.all<{ id: string }>('SELECT id FROM bookings WHERE status = ? ORDER BY created_at DESC LIMIT 200', status)
+      : this.db.all<{ id: string }>('SELECT id FROM bookings ORDER BY created_at DESC LIMIT 200');
+    return rows.map((r) => {
+      const b = this.row(r.id);
+      return { ...this.view(r.id), operatorId: b.operator_id, operatorPayoutCents: b.operator_payout_cents, platformFeeCents: b.platform_fee_cents };
+    });
+  }
+
+  operatorOf(bookingId: string): string {
+    return this.row(bookingId).operator_id;
+  }
+
+  statusOf(bookingId: string): BookingStatus {
+    return this.row(bookingId).status;
+  }
+
+  economics(bookingId: string) {
+    const b = this.row(bookingId);
+    return { operatorPayoutCents: b.operator_payout_cents, totalCents: b.total_cents, pax: b.pax, legId: b.leg_id, contactEmail: b.contact_email };
   }
 
   listForOperator(operatorId: string) {
