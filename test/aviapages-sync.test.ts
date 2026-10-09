@@ -27,11 +27,11 @@ test('full sync ingests every listing and learns airports, aircraft types, opera
   assert.equal(r.ingested + (r.skipped.unsupported_aircraft ?? 0), expected);
 
   // Airports and types outside the curated lists were learned.
-  assert.ok(findAirport('KMMU'), 'Morristown learned from the feed');
+  assert.ok(findAirport('KMMU'), 'Morristown is curated (and also listed by the feed)');
   assert.ok(findAirport('LFLB'), 'Chambery learned from the feed');
   assert.equal(findAircraftType('B350')?.category, 'turboprop');
   assert.equal(findAircraftType('GLF5')?.category, 'ultra-long');
-  assert.ok(app.reference.airports().some((a) => a.icao === 'KMMU'), 'persisted for the next restart');
+  assert.ok(app.reference.airports().some((a) => a.icao === 'LFLB'), 'persisted for the next restart');
 
   // Operators and tails registered with contact details, photos and amenities.
   const ops = app.fleet.listOperators().filter((o) => o.source === 'aviapages');
