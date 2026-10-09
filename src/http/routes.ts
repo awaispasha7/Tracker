@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 import type { ServerResponse } from 'node:http';
 import type { App } from '../app.ts';
 import { Router, type Ctx } from './router.ts';
-import { AppError, CATEGORIES, type AircraftCategory, type Leg, type Operator } from '../domain/types.ts';
+import { AppError, CATEGORIES, DAY, type AircraftCategory, type Leg, type Operator } from '../domain/types.ts';
 import { searchAirports, getAirport } from '../reference/airports.ts';
 import { getAircraftType } from '../reference/aircraft-types.ts';
 import { AGREEMENT_HASH, AGREEMENT_TEXT, AGREEMENT_VERSION } from '../booking/agreement.ts';
@@ -132,7 +132,48 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
   r.on('GET', '/api/config', () => ({
     aviapages: app.aviapages ? { enabled: true, mode: app.aviapages.mode } : { enabled: false, mode: 'off' },
     charterQuotes: app.charters.enabled,
+    skyaccess: app.skyaccess ? { enabled: true, mode: app.skyaccess.mode } : { enabled: false, mode: 'off' },
   }));
+
+  // ---------- public: SkyAccess partner flights (booked on SkyAccess, not through us) ----------
+  const skyaccess = () => {
+    if (!app.skyaccess) throw new AppError(404, 'partner_disabled', 'SkyAccess partner flights are not enabled');
+    return app.skyaccess;
+  };
+  const isoDay = (t: number) => new Date(t).toISOString().slice(0, 10);
+
+  r.on('GET', '/api/partners/skyaccess/search', async ({ query }) => {
+    const date = query.get('date');
+    const flex = Math.max(0, Math.min(14, num(query.get('flex')) ?? 0));
+    const day = date ? Date.parse(date) : NaN;
+    if (date && Number.isNaN(day)) throw new AppError(400, 'bad_date', 'date must be YYYY-MM-DD');
+    const maxPrice = num(query.get('maxPrice'));
+    return skyaccess().search({
+      origin: query.get('from') || undefined,
+      destination: query.get('to') || undefined,
+      dateFrom: date ? isoDay(Math.max(now(), day - flex * DAY)) : undefined,
+      dateTo: date ? isoDay(day + flex * DAY) : undefined,
+      passengers: num(query.get('pax')),
+      maxPriceUsd: maxPrice && maxPrice > 0 ? maxPrice : undefined,
+    });
+  });
+
+  r.on('GET', '/api/partners/skyaccess/flights/:id', async ({ params }) => {
+    const flight = await skyaccess().flight(params.id);
+    if (!flight) throw new AppError(404, 'flight_not_found', 'This SkyAccess flight is no longer available');
+    return flight;
+  });
+
+  r.on('GET', '/api/partners/skyaccess/estimate', ({ query }) => skyaccess().estimate({
+    origin: query.get('from') ?? '', destination: query.get('to') ?? '', passengers: num(query.get('pax')), category: query.get('category') ?? undefined,
+  }));
+
+  /** Sends the traveler's enquiry to a SkyAccess specialist. No payment, no booking. */
+  r.on('POST', '/api/partners/skyaccess/booking-requests', async ({ body, res }) => {
+    const out = await skyaccess().requestBooking(body as Parameters<NonNullable<App['skyaccess']>['requestBooking']>[0]);
+    res.statusCode = 201;
+    return out;
+  });
 
   // ---------- public: custom charter requests ----------
   r.on('POST', '/api/charter-requests', async ({ body, res }) => {
@@ -293,6 +334,16 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     requireAdmin(ctx);
     return app.legs.recentIngestErrors(100);
   });
+  r.on('GET', '/api/admin/skyaccess', async (ctx) => {
+    requireAdmin(ctx);
+    if (!app.skyaccess) return { enabled: false, mode: 'off' };
+    const tools = await app.skyaccess.client.listTools(true).then(
+      (t) => t.map((x) => ({ name: x.name, readOnly: x.annotations?.readOnlyHint ?? null, input: Object.keys(x.inputSchema?.properties ?? {}) })),
+      (e: Error) => ({ error: e.message }),
+    );
+    return { enabled: true, mode: app.skyaccess.mode, endpoint: app.skyaccess.client.config.endpoint, tools, requests: app.skyaccess.recentRequests() };
+  });
+
   r.on('GET', '/api/admin/sources', (ctx) => {
     requireAdmin(ctx);
     return app.fleet.listSources();

@@ -23,6 +23,8 @@ if (AVP_MODE === 'live' && !AVP_KEY) throw new Error('AVIAPAGES_MODE=live requir
 const mock = AVP_MODE === 'mock'
   ? new AviapagesMock({ clock: systemClock, baseUrl: `http://localhost:${PORT}/mock-aviapages`, replyDelayMs: Number(process.env.AVIAPAGES_MOCK_REPLY_SECONDS ?? 90) * 1000 })
   : undefined;
+// ---------- SkyAccess: public MCP server, no key needed. SKYACCESS_MODE=mock for offline demos, off to hide. ----------
+const SKY_MODE = (process.env.SKYACCESS_MODE ?? 'live') as 'live' | 'mock' | 'off';
 const minutes = (name: string, fallback: number) => (process.env[name] ? Number(process.env[name]) * MINUTE : fallback);
 
 const app = createApp({
@@ -40,6 +42,7 @@ const app = createApp({
       listingMaxAgeMs: minutes('AVIAPAGES_LISTING_MAX_AGE_MINUTES', 12 * HOUR),
     },
   },
+  skyaccess: { mode: SKY_MODE, config: process.env.SKYACCESS_ENDPOINT ? { endpoint: process.env.SKYACCESS_ENDPOINT } : undefined },
   comms: {
     pollEveryMs: minutes('AVIAPAGES_POLL_MINUTES', mock ? 1 * MINUTE : 3 * MINUTE),
     replyToAddress: process.env.REPLY_TO_ADDRESS ?? 'ops@emptylegtracker.example',
@@ -138,6 +141,7 @@ server.listen(PORT, () => {
   console.log(`  operator portal  http://localhost:${PORT}/operator   (try key: ${seeded.operatorKeys.op_skyline})`);
   console.log(`  ops console      http://localhost:${PORT}/admin      (key: ${ADMIN_KEY === DEV_ADMIN_KEY ? DEV_ADMIN_KEY : '$ADMIN_KEY'})`);
   console.log(`  Aviapages        ${AVP_MODE}${AVP_MODE === 'mock' ? ' (set AVIAPAGES_API_KEY to go live)' : ''}`);
+  console.log(`  SkyAccess        ${SKY_MODE}${SKY_MODE === 'live' ? ' (partner flights from mcp.skyaccess.com)' : ''}`);
   console.log(`  feed simulator   ${SIMULATE ? 'on (SIMULATE=0 to disable)' : 'off'}\n`);
 });
 

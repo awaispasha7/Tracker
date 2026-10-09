@@ -20,6 +20,9 @@ import { EmptyLegSync, type SyncConfig } from './integrations/aviapages/sync.ts'
 import { CommsService, type CommsConfig } from './comms/comms.ts';
 import { Calculators } from './integrations/aviapages/calculators.ts';
 import { CharterRequestService } from './charter/charter-requests.ts';
+import { SkyAccessClient, type SkyAccessConfig } from './integrations/skyaccess/client.ts';
+import { SkyAccessMock } from './integrations/skyaccess/mock.ts';
+import { SkyAccessService } from './integrations/skyaccess/service.ts';
 
 export interface AviapagesOptions {
   /** 'live' calls the real API with apiKey; 'mock' uses the in-process mock; 'off' disables the integration. */
@@ -34,8 +37,17 @@ export interface AviapagesOptions {
   fetch?: FetchLike;
 }
 
+export interface SkyAccessOptions {
+  /** 'live' calls the public SkyAccess MCP server (no key needed); 'mock' uses the in-process mock; 'off' disables it. */
+  mode: 'live' | 'mock' | 'off';
+  config?: Partial<SkyAccessConfig>;
+  mock?: SkyAccessMock;
+  fetch?: FetchLike;
+}
+
 export interface AppOptions {
   aviapages?: AviapagesOptions;
+  skyaccess?: SkyAccessOptions;
   comms?: Partial<CommsConfig>;
   dbPath?: string;
   clock?: Clock;
@@ -73,7 +85,8 @@ export function createApp(opts: AppOptions = {}) {
   pricing.insights = calculators;
   const comms = new CommsService({ db, fleet, legs, market, bookings, outbox, kv, clock, client: aviapages?.client ?? null, config: opts.comms });
   const charters = new CharterRequestService({ db, fleet, legs, reference, outbox, pricing, comms, calculators, client: aviapages?.client ?? null, clock });
-  return { db, clock, fleet, legs, market, reference, kv, calcCache, aviapages, comms, calculators, charters, pricing, search, outbox, payments, bookings, alerts, ingest };
+  const skyaccess = createSkyAccess(opts.skyaccess, { db, clock });
+  return { db, clock, fleet, legs, market, reference, kv, calcCache, aviapages, skyaccess, comms, calculators, charters, pricing, search, outbox, payments, bookings, alerts, ingest };
 }
 
 export type App = ReturnType<typeof createApp>;
@@ -96,4 +109,13 @@ function createAviapages(
   const client = new AviapagesClient({ config, fetch: fetchImpl, db: deps.db, clock: deps.clock });
   const sync = new EmptyLegSync({ client, ingest: deps.ingest, fleet: deps.fleet, reference: deps.reference, legs: deps.legs, kv: deps.kv, clock: deps.clock, config: opts?.sync });
   return { mode, client, sync, mock };
+}
+
+function createSkyAccess(opts: SkyAccessOptions | undefined, deps: { db: Database; clock: Clock }) {
+  const mode = opts?.mode ?? 'off';
+  if (mode === 'off') return null;
+  const mock = mode === 'mock' ? opts?.mock ?? new SkyAccessMock({ now: deps.clock.now }) : null;
+  const fetchImpl: FetchLike = opts?.fetch ?? (mock ? mock.fetch : (globalThis.fetch as unknown as FetchLike));
+  const client = new SkyAccessClient({ config: opts?.config, fetch: fetchImpl, now: deps.clock.now });
+  return new SkyAccessService({ client, db: deps.db, clock: deps.clock, mode });
 }

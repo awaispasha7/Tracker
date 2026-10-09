@@ -7,13 +7,14 @@ below a regular one-way charter.
 ```
 npm install                  # dev tooling only — there are no runtime dependencies
 npm start                    # http://localhost:3000 — demo marketplace + Aviapages in mock mode
-npm test                     # 95 unit/integration tests
-npm run e2e                  # 14 browser end-to-end flows against a fresh server (needs Chromium*)
+npm test                     # 108 unit/integration tests
+npm run e2e                  # 15 browser end-to-end flows against a fresh server (needs Chromium*)
 npm run typecheck
 
 AVIAPAGES_API_KEY=… npm run aviapages:check     # day-1 live check of your Aviapages key
 AVIAPAGES_API_KEY=… npm run aviapages:harvest   # download as much as your budget allows
 AVIAPAGES_API_KEY=… npm start                   # run on live Aviapages data
+npm run skyaccess:check                         # live check of the SkyAccess MCP server (no key needed)
 ```
 
 Requires Node.js ≥ 22.18 (runs TypeScript natively and uses the built-in `node:sqlite`).
@@ -27,7 +28,8 @@ Requires Node.js ≥ 22.18 (runs TypeScript natively and uses the built-in `node
 | Ops console | `/admin` | `dev_admin_key` (set `ADMIN_KEY` in any real deployment) |
 
 Environment: `PORT` (3000), `DB_PATH` (`data/emptylegs.db`), `ADMIN_KEY`, `SIMULATE=0` to turn off the
-demo feed simulator, plus the Aviapages settings in **[docs/AVIAPAGES.md](docs/AVIAPAGES.md)**.
+demo feed simulator, `SKYACCESS_MODE` (`live` | `mock` | `off`), plus the Aviapages settings in
+**[docs/AVIAPAGES.md](docs/AVIAPAGES.md)**.
 Delete `data/` to reseed.
 
 ## What it does
@@ -58,6 +60,13 @@ Built against the official OpenAPI spec (vendored); the mock is validated agains
 suite. See **[docs/AVIAPAGES.md](docs/AVIAPAGES.md)** for setup and the 14-day trial plan, and
 **[docs/FEATURE-CHECK.md](docs/FEATURE-CHECK.md)** for what was tested and how.
 
+### SkyAccess partner flights (`src/integrations/skyaccess/`)
+
+Search results also show up to 5 empty legs from [SkyAccess](https://skyaccess.com)'s public MCP
+server. Travelers book those on SkyAccess (booking link), or send a contact request that a
+SkyAccess specialist answers by email (`request_booking`: no payment, no booking). See
+**[docs/SKYACCESS.md](docs/SKYACCESS.md)**.
+
 See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the design: how truth is decided, the price
 waterfall and every guardrail, the booking state machine, and what changes for production.
 
@@ -74,6 +83,8 @@ Public
 - `GET  /api/config` — which integrations are enabled
 - `POST /api/charter-requests {name, email, phone?, from, to, date, time?, pax, notes?}` → aircraft options
 - `POST /api/charter-requests/:id/send {email, aircraftIds[]}` · `GET /api/charter-requests/:id?email=`
+- `GET  /api/partners/skyaccess/search?from=&to=&date=&flex=&pax=&maxPrice=` · `GET /api/partners/skyaccess/flights/:id` · `GET /api/partners/skyaccess/estimate?from=&to=&pax=&category=`
+- `POST /api/partners/skyaccess/booking-requests {flightId?, name, email, phone?, origin, destination, departureDate, passengers, notes?}`
 
 Feeds (machine-to-machine, `Authorization: Bearer <feed key>`)
 - `POST /api/feeds/:sourceId` — JSON in the source's format, or `text/csv` for operator sources
@@ -88,7 +99,7 @@ Ops (`Authorization: Bearer <admin key>`)
 - `POST /api/admin/legs/:id/approve-price` · `POST /api/admin/market {fuelCentsPerGal, fx{EUR}}`
 - `GET /api/admin/bookings?status=` · `POST /api/admin/bookings/:id/confirm|decline` (on behalf of network operators)
 - `GET /api/admin/threads?attention=1` · `GET /api/admin/threads/:id` · `POST /api/admin/threads/:id/messages|retry|resolve`
-- `GET /api/admin/charter-requests` · `GET /api/admin/integrations`
+- `GET /api/admin/charter-requests` · `GET /api/admin/integrations` · `GET /api/admin/skyaccess`
 - `POST /api/admin/integrations/aviapages/sync {kind: full|incremental}` · `…/poll` · `…/check {includeWrites?}`
 
 Inbound email (`?token=$INBOUND_EMAIL_TOKEN`)

@@ -14,7 +14,8 @@
     "typecheck": "tsc -p .",
     "e2e": "node --disable-warning=ExperimentalWarning scripts/e2e.ts",
     "aviapages:check": "node --disable-warning=ExperimentalWarning scripts/aviapages-check.ts",
-    "aviapages:harvest": "node --disable-warning=ExperimentalWarning scripts/aviapages-harvest.ts"
+    "aviapages:harvest": "node --disable-warning=ExperimentalWarning scripts/aviapages-harvest.ts",
+    "skyaccess:check": "node --disable-warning=ExperimentalWarning scripts/skyaccess-check.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

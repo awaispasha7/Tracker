@@ -21,7 +21,7 @@ mkdirSync(OUT, { recursive: true });
 rmSync(DB, { force: true });
 
 const server = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/server.ts'], {
-  env: { ...process.env, PORT: String(PORT), DB_PATH: DB, SIMULATE: '0', AVIAPAGES_MODE: 'mock', AVIAPAGES_MOCK_REPLY_SECONDS: '2', AVIAPAGES_API_KEY: '' },
+  env: { ...process.env, PORT: String(PORT), DB_PATH: DB, SIMULATE: '0', AVIAPAGES_MODE: 'mock', AVIAPAGES_MOCK_REPLY_SECONDS: '2', AVIAPAGES_API_KEY: '', SKYACCESS_MODE: 'mock' },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
 let serverLog = '';
@@ -253,6 +253,25 @@ await step('Inbound operator email is threaded by reference', async () => {
   });
   const body = await r.json();
   if (body.matched !== 'ref' || body.threadId !== t.id) throw new Error(JSON.stringify(body));
+});
+
+await step('SkyAccess partner flight: booking link and contact request', async () => {
+  const t = await newPage();
+  await t.goto(BASE);
+  await t.fill('#from', 'TEB');
+  await t.fill('#to', 'PBI');
+  await t.click('button.go');
+  await t.locator('[data-sky]', { hasText: 'Citation XLS+' }).click();
+  await t.waitForSelector('#sky-req');
+  const href = await t.getAttribute('#drawer a.btn', 'href');
+  if (!href?.startsWith('https://skyaccess.com/')) throw new Error(`unexpected booking link ${href}`);
+  await t.fill('#sky-req [name=name]', 'Ada Lovelace');
+  await t.fill('#sky-req [name=email]', 'ada@example.com');
+  await t.check('#sky-req [name=consent]');
+  await t.click('#sky-req button[type=submit]');
+  await t.waitForSelector('#drawer .notice.good');
+  await t.screenshot({ path: `${OUT}/09b-skyaccess.png` });
+  await t.close();
 });
 
 await step('Route alert signup', async () => {

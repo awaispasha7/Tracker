@@ -277,6 +277,23 @@ CREATE TABLE IF NOT EXISTS charter_offers (
 );
 CREATE INDEX IF NOT EXISTS charter_offers_by_request ON charter_offers(request_id);
 
+-- Enquiries sent to SkyAccess (request_booking) on a traveler's behalf: what personal data left, and when.
+CREATE TABLE IF NOT EXISTS skyaccess_requests (
+  id TEXT PRIMARY KEY,
+  flight_id TEXT,
+  contact_name TEXT NOT NULL,
+  contact_email TEXT NOT NULL,
+  contact_phone TEXT,
+  origin TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  departure_date TEXT NOT NULL,
+  pax INTEGER NOT NULL,
+  notes TEXT,
+  status TEXT NOT NULL,
+  response TEXT,
+  created_at INTEGER NOT NULL
+);
+
 -- Transactional outbox: written in the same transaction as the state change, delivered later.
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

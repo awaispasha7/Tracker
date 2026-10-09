@@ -39,6 +39,7 @@ async function runSearch({ quiet = false } = {}) {
   lastQuery = q;
   if (!quiet) $('#results').innerHTML = '<div class="card empty">Searching live inventory…</div>';
   try {
+    if (!quiet) searchPartners(q);
     const r = await api(`/api/search?${q}`);
     if (lastQuery !== q) return;
     renderResults(r);
@@ -101,6 +102,61 @@ $('#results').addEventListener('click', (e) => {
 $('#results').addEventListener('keydown', (e) => {
   const card = e.target.closest('[data-leg]');
   if (card && e.key === 'Enter') location.hash = `leg=${card.dataset.leg}`;
+});
+
+// ---------- SkyAccess partner flights: shown beside ours, booked on SkyAccess ----------
+const config = api('/api/config').catch(() => ({}));
+const partnerFlights = new Map();
+const usd = (n) => (n == null ? 'Contact for price' : money(n * 100));
+const placeText = (p) => p.code || p.city || p.name || '—';
+
+async function searchPartners(q) {
+  const box = $('#partners');
+  if (!(await config).skyaccess?.enabled) return;
+  const pq = new URLSearchParams({ from: q.get('from'), pax: q.get('pax') ?? '1', flex: q.get('flex') ?? '0' });
+  if (q.get('to')) pq.set('to', q.get('to'));
+  if (q.get('date')) pq.set('date', q.get('date'));
+  box.hidden = false;
+  box.innerHTML = '<h2>More from SkyAccess</h2><div class="card empty">Checking SkyAccess partner flights…</div>';
+  try {
+    const { flights } = await api(`/api/partners/skyaccess/search?${pq}`);
+    if (lastQuery !== q) return;
+    flights.forEach((f) => partnerFlights.set(f.flightId, f));
+    if (!flights.length) { box.hidden = true; return; }
+    box.innerHTML = `<h2>More from SkyAccess</h2>
+      <p class="faint">Partner empty legs. Booked and paid on SkyAccess; taxes and fees are added at their checkout.</p>
+      <div class="results">${flights.map((f) => `
+        <article class="card leg" data-sky="${esc(f.flightId)}" tabindex="0">
+          <div>
+            <div class="route">
+              <span>${esc(placeText(f.from))}<small>${esc(f.from.city ?? f.from.name ?? '')}</small></span>
+              <span class="arrow">→</span>
+              <span>${esc(placeText(f.to))}<small>${esc(f.to.city ?? f.to.name ?? '')}</small></span>
+            </div>
+            <div class="facts">
+              ${f.departAt ? `<span>${esc(when(f.departAt))}</span>` : ''}
+              ${f.aircraft ? `<span>${esc(f.aircraft)}${f.seats ? ` · ${f.seats} seats` : ''}</span>` : ''}
+            </div>
+            <div class="notes"><span class="tag">SkyAccess partner</span></div>
+          </div>
+          <div class="price">
+            <div class="total num">${esc(usd(f.priceUsd))}</div>
+            <div class="faint">whole aircraft${f.priceUsd == null ? '' : ' · plus taxes &amp; fees'}</div>
+          </div>
+        </article>`).join('')}</div>`;
+  } catch (e) {
+    if (lastQuery !== q) return;
+    box.innerHTML = `<h2>More from SkyAccess</h2><div class="card empty">${esc(e.code === 'partner_rate_limited' ? 'SkyAccess is busy — search again in a minute.' : 'SkyAccess partner flights are unavailable right now.')}</div>`;
+  }
+}
+
+$('#partners').addEventListener('click', (e) => {
+  const card = e.target.closest('[data-sky]');
+  if (card) location.hash = `sky=${card.dataset.sky}`;
+});
+$('#partners').addEventListener('keydown', (e) => {
+  const card = e.target.closest('[data-sky]');
+  if (card && e.key === 'Enter') location.hash = `sky=${card.dataset.sky}`;
 });
 
 // ---------- live inventory ----------
@@ -310,9 +366,78 @@ async function showBooking(id, email) {
   pollTimer = setInterval(render, 5000);
 }
 
+async function showPartnerFlight(flightId) {
+  stopPoll();
+  openDrawer('SkyAccess flight');
+  const body = $('#drawer-body');
+  body.innerHTML = '<p class="muted">Checking the flight is still available…</p>';
+  let f;
+  try {
+    f = await api(`/api/partners/skyaccess/flights/${encodeURIComponent(flightId)}`);
+  } catch (e) {
+    const cached = partnerFlights.get(flightId);
+    if (e.status === 404 || !cached) {
+      body.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`;
+      return;
+    }
+    f = cached;
+  }
+  const pax = Number($('#pax').value) || 1;
+  const date = f.departAt ? f.departAt.slice(0, 10) : ($('#date').value || '');
+  $('#drawer-title').textContent = `${placeText(f.from)} → ${placeText(f.to)}`;
+  body.innerHTML = `
+    <div>
+      <div class="route"><span>${esc(placeText(f.from))}<small>${esc(f.from.name ?? f.from.city ?? '')}</small></span><span class="arrow">→</span><span>${esc(placeText(f.to))}<small>${esc(f.to.name ?? f.to.city ?? '')}</small></span></div>
+      ${f.departAt ? `<p class="muted" style="margin:.5em 0 0">${esc(when(f.departAt))}</p>` : ''}
+    </div>
+    <div class="grid2">
+      <div><div class="faint">Aircraft</div>${esc(f.aircraft ?? '—')}${f.seats ? `<br><span class="faint">${f.seats} seats</span>` : ''}</div>
+      <div><div class="faint">Price, whole aircraft</div><strong>${esc(usd(f.priceUsd))}</strong>${f.priceUsd == null ? '' : '<br><span class="faint">taxes &amp; fees added at SkyAccess checkout</span>'}</div>
+    </div>
+    ${f.amenities?.length ? `<div class="notes">${f.amenities.map((a) => `<span class="tag">${esc(a)}</span>`).join('')}</div>` : ''}
+    <div class="notice info">This flight is listed by our partner SkyAccess. You book and pay on their site, under their terms.</div>
+    ${f.bookingUrl ? `<a class="btn" style="text-align:center;text-decoration:none" href="${esc(f.bookingUrl)}" target="_blank" rel="noopener noreferrer">Book on SkyAccess</a>` : ''}
+    <form class="stack" id="sky-req">
+      <h3 style="margin:0">Or ask SkyAccess to contact you</h3>
+      <p class="faint" style="margin:0">A SkyAccess specialist emails you to confirm availability and price. No payment is taken and nothing is booked yet.</p>
+      <div class="grid2">
+        <label>Full name<input name="name" required autocomplete="name"></label>
+        <label>Email<input name="email" type="email" required autocomplete="email"></label>
+        <label>Phone (optional)<input name="phone" type="tel" autocomplete="tel"></label>
+        <label>Passengers<input name="pax" type="number" min="1" max="50" value="${pax}" required></label>
+        <label>Departure date<input name="date" type="date" value="${esc(date)}" required></label>
+      </div>
+      <label>Notes (optional)<textarea name="notes" rows="2" maxlength="1000"></textarea></label>
+      <label class="check"><input type="checkbox" name="consent" required> Send my name, email and trip details to SkyAccess so they can contact me.</label>
+      <button type="submit">Send request to SkyAccess</button>
+      <div id="sky-out"></div>
+    </form>`;
+  $('#sky-req').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const btn = e.target.querySelector('button[type=submit]');
+    btn.disabled = true;
+    try {
+      const r = await api('/api/partners/skyaccess/booking-requests', {
+        method: 'POST',
+        body: {
+          flightId: f.flightId, name: fd.get('name'), email: fd.get('email'), phone: fd.get('phone'),
+          origin: f.from.code || f.from.city || f.from.name, destination: f.to.code || f.to.city || f.to.name,
+          departureDate: fd.get('date'), passengers: Number(fd.get('pax')), notes: fd.get('notes'),
+        },
+      });
+      e.target.innerHTML = `<div class="notice good">${esc(r.message)}</div><p class="faint">Reference ${esc(r.id)}</p>`;
+    } catch (err) {
+      btn.disabled = false;
+      $('#sky-out').innerHTML = `<div class="notice bad">${esc(err.message)}</div>`;
+    }
+  });
+}
+
 function route() {
   const h = new URLSearchParams(location.hash.slice(1));
-  if (h.get('leg')) showLeg(h.get('leg'), Number(h.get('pax')) || undefined);
+  if (h.get('sky')) showPartnerFlight(h.get('sky'));
+  else if (h.get('leg')) showLeg(h.get('leg'), Number(h.get('pax')) || undefined);
   else if (h.get('booking')) showBooking(h.get('booking'), h.get('email') ?? '');
 }
 window.addEventListener('hashchange', route);

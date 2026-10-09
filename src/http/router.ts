@@ -49,7 +49,7 @@ export class Router {
         const auth = req.headers.authorization;
         const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : null;
         const out = await r.handler({ req, res, params, query: url.searchParams, body, bearer });
-        if (!res.writableEnded && !res.headersSent) sendJson(res, 200, out ?? { ok: true });
+        if (!res.writableEnded && !res.headersSent) sendJson(res, res.statusCode || 200, out ?? { ok: true });
       } catch (e) {
         if (e instanceof AppError) {
           sendJson(res, e.status, { error: { code: e.code, message: e.message, details: e.details } });

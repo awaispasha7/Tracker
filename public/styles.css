@@ -156,6 +156,9 @@ ol.timeline li::before { content: ""; width: 10px; height: 10px; border-radius: 
 
 section.how { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 40px 0; }
 @media (max-width: 760px) { section.how { grid-template-columns: 1fr; } }
+section.partners { margin-top: 28px; }
+section.partners h2 { margin: 0 0 4px; font-size: 1.1rem; }
+#sky-req textarea { font-family: inherit; }
 footer { padding: 32px 0 48px; color: var(--ink-3); font-size: 0.8rem; }
 
 /* tables for portal/admin */
