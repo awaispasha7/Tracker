@@ -3,9 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Empty Leg Tracker</title>
-  <meta name="description" content="Book whole private jets on repositioning flights, at one all-in price well below full charter.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M2 14.5 22 6l-6.5 14-3-6.5L2 14.5Z%27 fill=%27%231d4e89%27/%3E%3C/svg%3E">
+  <title>Empty Leg Tracker · Private Jet Empty Leg Flights</title>
+  <meta name="description" content="Book whole private jets on repositioning flights from certificated operators, at one all-in price often 40–70% below a one-way charter. New York, Los Angeles, Miami, San Francisco and more.">
+  <!--SEO-->
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -16,18 +17,23 @@
       <nav class="links">
         <a href="/charter">Custom charter</a>
         <a href="#alerts" id="alerts-link">Route alerts</a>
-        <a href="/operator">For operators</a>
+        <a class="keep" href="/empty-legs">Routes</a>
+        <a href="/operator/apply">For operators</a>
       </nav>
     </div>
   </header>
 
-  <main class="wrap">
-    <section class="hero">
-      <h1>Private jets flying empty, at a fraction of charter.</h1>
-      <p class="muted">Operators list the repositioning flights they're already flying. You book the whole aircraft at one all-in price — taxes and fees included — typically 40–70% below a regular one-way charter.</p>
-    </section>
+  <section class="masthead">
+    <div class="wrap">
+      <p class="eyebrow">Private aviation · Empty legs</p>
+      <h1>Fly private on the jets already flying your way.</h1>
+      <p class="lead">Operators list the repositioning flights they're already flying. You book the whole aircraft at one all-in price, typically 40–70% below a regular one-way charter.</p>
+      <div class="trust"><span>Certificated operators only</span><span>One all-in price, no surprises</span><span>Nothing payable until the operator confirms</span><span>Personal concierge</span></div>
+    </div>
+  </section>
 
-    <div class="card">
+  <main class="wrap">
+    <div class="card search-card">
       <form class="search" id="search">
         <label>From<input id="from" placeholder="City or airport" autocomplete="off" required></label>
         <label>To<input id="to" placeholder="Anywhere" autocomplete="off"></label>
@@ -52,15 +58,39 @@
       <span class="meta faint num" id="meta"></span>
     </div>
     <div class="results" id="results">
-      <div class="card empty">Search a city or airport to see empty legs departing nearby. Try <a href="#" data-try="TEB">New York</a>, <a href="#" data-try="VNY">Los Angeles</a>, <a href="#" data-try="PBI">Palm Beach</a> or <a href="#" data-try="GVA">Geneva</a>.<br>No leg on your route? <a href="/charter">Get quotes for a custom charter</a>.</div>
+      <div class="card empty">Search a city or airport to see empty legs departing nearby. Try <a href="#" data-try="TEB">New York</a>, <a href="#" data-try="VNY">Los Angeles</a>, <a href="#" data-try="PBI">Palm Beach</a> or <a href="#" data-try="SFO">San Francisco</a>.<br>No leg on your route? <a href="/charter">Get quotes for a custom charter</a>.</div>
     </div>
 
     <section class="partners" id="partners" hidden></section>
 
     <section class="how">
-      <div class="card pad"><h3>1. Find a leg</h3><p class="muted">Every listing is a real aircraft already scheduled to fly that route. We search nearby airports and flexible dates, because empty legs don't move.</p></div>
-      <div class="card pad"><h3>2. Request &amp; sign</h3><p class="muted">Your card is authorized, not charged. The certificated operator confirms availability, usually within the hour.</p></div>
-      <div class="card pad"><h3>3. Fly</h3><p class="muted">You're charged on confirmation. If the operator's primary trip changes and the leg cancels, you get a full refund — keep a refundable backup.</p></div>
+      <div class="card pad"><p class="eyebrow">01</p><h3>Find a leg</h3><p class="muted">Every listing is a real aircraft already scheduled to fly that route. We search nearby airports and flexible dates, because empty legs don't move.</p></div>
+      <div class="card pad"><p class="eyebrow">02</p><h3>Request &amp; sign</h3><p class="muted">Request the flight and sign the charter agreement. The certificated operator confirms availability, usually within a few hours.</p></div>
+      <div class="card pad"><p class="eyebrow">03</p><h3>Fly</h3><p class="muted">Arrive at the private terminal minutes before departure. If the operator's main trip changes and the leg cancels, you're refunded in full.</p></div>
+    </section>
+
+    <section class="popular">
+      <p class="eyebrow">Popular routes</p>
+      <h2>Where empty legs fly most</h2>
+      <div class="routegrid">
+        <a href="/empty-legs/new-york-to-palm-beach">New York → Palm Beach</a>
+        <a href="/empty-legs/new-york-to-miami">New York → Miami</a>
+        <a href="/empty-legs/new-york-to-los-angeles">New York → Los Angeles</a>
+        <a href="/empty-legs/new-york-to-the-hamptons">New York → The Hamptons</a>
+        <a href="/empty-legs/los-angeles-to-las-vegas">Los Angeles → Las Vegas</a>
+        <a href="/empty-legs/los-angeles-to-san-francisco">Los Angeles → San Francisco</a>
+        <a href="/empty-legs/los-angeles-to-los-cabos">Los Angeles → Los Cabos</a>
+        <a href="/empty-legs/san-francisco-to-lake-tahoe">San Francisco → Lake Tahoe</a>
+        <a href="/empty-legs/miami-to-nassau">Miami → Nassau</a>
+        <a href="/empty-legs/dallas-to-aspen">Dallas → Aspen</a>
+        <a href="/empty-legs/los-angeles-to-aspen">Los Angeles → Aspen</a>
+        <a href="/empty-legs">All routes and cities →</a>
+      </div>
+    </section>
+
+    <section class="concierge" id="concierge" hidden>
+      <div><h2>Prefer to talk to someone?</h2><p>Our concierge finds the right aircraft, arranges catering and ground transport, and watches for empty legs on your routes.</p></div>
+      <div class="actions" id="concierge-actions"></div>
     </section>
 
     <section class="card pad" id="alerts">
@@ -77,7 +107,12 @@
     </section>
   </main>
 
-  <footer class="wrap">Flights are operated by the FAA Part 135 / EASA AOC certificated carriers shown on each listing, which hold operational control. Demo data.</footer>
+  <footer class="wrap site-footer">
+    <div><strong>Empty Leg Tracker</strong></div>
+    <div id="footer-contact"></div>
+    <div class="faint">Flights are operated by the FAA Part 135 / EASA AOC certificated carriers shown on each listing, which hold operational control. Empty Leg Tracker arranges charter on your behalf as an agent.</div>
+    <nav class="faint"><a href="/empty-legs">All empty-leg routes</a> · <a href="/charter">Custom charter</a> · <a href="/operator/apply">List your empty legs</a></nav>
+  </footer>
 
   <div class="scrim" id="scrim"></div>
   <aside class="drawer" id="drawer" aria-modal="true" role="dialog" aria-labelledby="drawer-title">

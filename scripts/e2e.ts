@@ -154,8 +154,7 @@ await step('Operator portal: reply in Messages', async () => {
 
 let avpBooking = '';
 await step('Aviapages leg: photos, wind-adjusted flight time, request-to-book', async () => {
-  await traveler.goto(BASE);
-  await traveler.click('[data-try=GVA]');
+  await traveler.goto(`${BASE}/?from=GVA`);
   await traveler.waitForSelector('.leg');
   await traveler.locator('.leg', { hasText: 'Operator confirms on request' }).first().click();
   await traveler.waitForSelector('#get-quote');
@@ -213,6 +212,7 @@ await step('Custom charter: search aircraft, request quotes from two operators',
 
 await step('Ops console: integrations dashboard and live contract check', async () => {
   const a = await adminPage();
+  await a.click('[data-tab=integrations]');
   await a.waitForSelector('text=Operators learned');
   await a.click('[data-act=check]');
   await a.waitForSelector('text=passed');
@@ -226,7 +226,7 @@ await step('Ops console: confirm the charter booking on the operator\'s behalf',
   const a = await adminPage();
   await a.click('[data-tab=bookings]');
   await a.click(`[data-confirm="${charterBooking}"]`);
-  await a.waitForSelector('text=Confirmed — card captured');
+  await a.waitForSelector('text=Confirmed — traveler and operator notified');
   const status = (await api('/api/admin/bookings', { admin: true })).find((b: { id: string }) => b.id === charterBooking).status;
   if (status !== 'confirmed') throw new Error(`charter booking is ${status}`);
   await a.screenshot({ path: `${OUT}/08-admin-bookings.png` });
@@ -289,8 +289,9 @@ await step('Every page fits a phone screen (no horizontal scroll)', async () => 
   await m.goto(`${BASE}/admin`);
   await m.fill('#key', ADMIN);
   await m.click('#login-form button');
+  await m.click('[data-tab=integrations]');
   await m.waitForSelector('text=Operators learned');
-  for (const path of ['/', '/charter', '/operator', '/admin']) {
+  for (const path of ['/', '/charter', '/operator', '/admin', '/operator/apply', '/empty-legs', '/empty-legs/new-york', '/empty-legs/los-angeles-to-las-vegas']) {
     await m.goto(BASE + path);
     await m.waitForLoadState('load');
     await m.waitForTimeout(300);

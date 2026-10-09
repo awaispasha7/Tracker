@@ -150,6 +150,34 @@ async function searchPartners(q) {
   }
 }
 
+// ---------- concierge contact, from server config ----------
+config.then(({ site }) => {
+  if (!site) return;
+  const tel = site.phone ? `tel:${site.phone.replace(/[^\d+]/g, '')}` : null;
+  const links = [
+    tel && `<a class="btn gold" href="${esc(tel)}">Call ${esc(site.phone)}</a>`,
+    site.whatsapp && `<a class="btn ghost" href="https://wa.me/${esc(site.whatsapp)}" rel="noopener">WhatsApp</a>`,
+    site.email && `<a class="btn ghost" href="mailto:${esc(site.email)}">Email us</a>`,
+  ].filter(Boolean);
+  if (links.length) {
+    $('#concierge-actions').innerHTML = links.join('');
+    $('#concierge').hidden = false;
+  }
+  const contact = [site.phone && `<a href="${esc(tel)}">${esc(site.phone)}</a>`, site.whatsapp && `<a href="https://wa.me/${esc(site.whatsapp)}" rel="noopener">WhatsApp</a>`, site.email && `<a href="mailto:${esc(site.email)}">${esc(site.email)}</a>`].filter(Boolean);
+  if (contact.length) $('#footer-contact').innerHTML = `Concierge: ${contact.join(' · ')}`;
+});
+
+// Deep links from route pages: /?from=TEB&to=PBI
+{
+  const q = new URLSearchParams(location.search);
+  if (q.get('from')) {
+    from.set(q.get('from').toUpperCase());
+    if (q.get('to')) to.set(q.get('to').toUpperCase());
+    if (q.get('pax')) $('#pax').value = q.get('pax');
+    runSearch();
+  }
+}
+
 $('#partners').addEventListener('click', (e) => {
   const card = e.target.closest('[data-sky]');
   if (card) location.hash = `sky=${card.dataset.sky}`;

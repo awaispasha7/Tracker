@@ -12,6 +12,7 @@ import { randomBytes } from 'node:crypto';
 import { loadSiteConfig } from './site/config.ts';
 import { InvoicePaymentProvider, MockPaymentProvider } from './booking/payments.ts';
 import { resendSender } from './alerts/email.ts';
+import { organizationLd } from './site/pages.ts';
 
 const PORT = Number(process.env.PORT ?? 3000);
 const SITE = loadSiteConfig();
@@ -82,7 +83,7 @@ if (PROD && !process.env.RESEND_API_KEY) console.warn('[email] RESEND_API_KEY is
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.json': 'application/json', '.ico': 'image/x-icon',
 };
 
 /** Mock mode only: stand-in aircraft photos so the UI shows images the way live data will. */
@@ -93,6 +94,21 @@ function mockPhoto(path: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 240"><defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue},45%,${cabin ? 30 : 72}%)"/><stop offset="1" stop-color="hsl(${hue},35%,${cabin ? 18 : 88}%)"/></linearGradient></defs><rect width="400" height="240" fill="url(#g)"/>${cabin
     ? '<rect x="40" y="70" width="320" height="120" rx="50" fill="#f3efe7" opacity=".9"/><rect x="70" y="120" width="60" height="50" rx="10" fill="#c9b79a"/><rect x="170" y="120" width="60" height="50" rx="10" fill="#c9b79a"/><rect x="270" y="120" width="60" height="50" rx="10" fill="#c9b79a"/>'
     : '<path d="M40 140 Q200 110 340 125 L370 128 Q380 132 370 136 L340 140 Q200 150 40 150 Z" fill="#fff"/><path d="M180 132 L230 95 L250 95 L215 135 Z M185 145 L235 185 L255 185 L220 143 Z M60 138 L50 105 L66 105 L84 136 Z" fill="#e8e8ee"/>'}<text x="16" y="228" font-family="sans-serif" font-size="12" fill="rgba(0,0,0,.45)">Mock photo · ${kind}</text></svg>`;
+}
+
+/** Static pages carry the brand name and, on the home page, canonical/OG tags and structured data. */
+function brandHtml(html: string, path: string): string {
+  let out = html.replaceAll('Empty Leg Tracker', SITE.brand);
+  if (path === '/') {
+    const seo = [
+      `<link rel="canonical" href="${SITE.url}/">`,
+      `<meta property="og:type" content="website"><meta property="og:site_name" content="${SITE.brand}"><meta property="og:url" content="${SITE.url}/">`,
+      `<meta property="og:title" content="${SITE.brand} · Private Jet Empty Leg Flights"><meta name="twitter:card" content="summary">`,
+      `<script type="application/ld+json">${JSON.stringify([organizationLd(SITE), { '@context': 'https://schema.org', '@type': 'WebSite', name: SITE.brand, url: SITE.url }]).replace(/</g, '\\u003c')}</script>`,
+    ].join('\n  ');
+    out = out.replace('<!--SEO-->', seo);
+  }
+  return out;
 }
 
 const server = createServer(async (req, res) => {
@@ -113,7 +129,8 @@ const server = createServer(async (req, res) => {
     return;
   }
   try {
-    const data = await readFile(full);
+    let data: Buffer | string = await readFile(full);
+    if (extname(full) === '.html') data = brandHtml(data.toString('utf8'), path);
     res.writeHead(200, { 'content-type': TYPES[extname(full)] ?? 'application/octet-stream', 'x-content-type-options': 'nosniff' });
     res.end(data);
   } catch {

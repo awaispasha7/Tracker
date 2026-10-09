@@ -7,6 +7,7 @@ import { searchAirports, getAirport } from '../reference/airports.ts';
 import { AIRCRAFT_TYPES, getAircraftType } from '../reference/aircraft-types.ts';
 import { agreementFor } from '../booking/agreement.ts';
 import { loadSiteConfig, type SiteConfig } from '../site/config.ts';
+import { hubPage, llmsTxt, marketPage, robotsTxt, sitemapXml } from '../site/pages.ts';
 import { isListable } from '../inventory/search.ts';
 import { runContractCheck } from '../integrations/aviapages/contract-check.ts';
 
@@ -36,6 +37,23 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     supplyStatus: leg.supplyStatus, commerceStatus: leg.commerceStatus, confidence: leg.confidence,
     lastSeenAt: new Date(leg.lastSeenAt).toISOString(),
   });
+
+  // ---------- public: SEO / AEO pages ----------
+  const send = (res: ServerResponse, type: string, body: string, maxAge = 300) => {
+    res.writeHead(200, { 'content-type': type, 'cache-control': `public, max-age=${maxAge}`, 'x-content-type-options': 'nosniff' }).end(body);
+  };
+  r.on('GET', '/empty-legs', ({ res }) => send(res, 'text/html; charset=utf-8', hubPage(app, site)));
+  r.on('GET', '/empty-legs/:slug', ({ params, res }) => {
+    const html = marketPage(app, site, params.slug.toLowerCase());
+    if (!html) {
+      res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><title>Not found</title><p>Page not found. <a href="/empty-legs">See all empty-leg routes</a>.</p>`);
+      return;
+    }
+    send(res, 'text/html; charset=utf-8', html);
+  });
+  r.on('GET', '/sitemap.xml', ({ res }) => send(res, 'application/xml; charset=utf-8', sitemapXml(site, now()), 3600));
+  r.on('GET', '/robots.txt', ({ res }) => send(res, 'text/plain; charset=utf-8', robotsTxt(site), 3600));
+  r.on('GET', '/llms.txt', ({ res }) => send(res, 'text/plain; charset=utf-8', llmsTxt(site), 3600));
 
   // ---------- public: discovery ----------
   r.on('GET', '/api/health', () => ({ ok: true, time: new Date(now()).toISOString(), index: app.search.stats() }));
