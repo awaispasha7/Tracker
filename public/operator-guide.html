@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operator Guide</title>
+  <meta name="description" content="How operators list empty legs: portal, spreadsheet upload or feed API, pricing, and booking confirmation.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 24 24%27%3E%3Cpath d=%27M2 14.5 22 6l-6.5 14-3-6.5L2 14.5Z%27 fill=%27%231d4e89%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/styles.css">
+  <style>
+    .guide { max-width: 760px; }
+    .guide section { margin: 0 0 28px; }
+    .guide pre { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-size: 0.8rem; }
+    .guide li { margin: 4px 0; }
+  </style>
+</head>
+<body>
+  <header class="top">
+    <div class="wrap">
+      <a class="brand" href="/">Empty Leg Tracker</a>
+      <span class="faint">Operator guide</span>
+      <nav class="links"><a href="/operator">Operator portal</a></nav>
+    </div>
+  </header>
+  <main class="wrap guide">
+    <section class="hero" style="padding-bottom:8px">
+      <h1>Listing your empty legs</h1>
+      <p class="muted">You keep flying your own trips. When a repositioning leg has no passengers, list it here and we sell the whole aircraft to a traveler at one all-in price. Nothing is charged until you confirm.</p>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <ol>
+        <li><strong>Sign up.</strong> <a href="/operator#apply">Apply</a> with your Part 135 certificate designator (or AOC). We check it against the FAA list and add the aircraft on your certificate to your fleet.</li>
+        <li><strong>List legs</strong> one of three ways: type them into the portal, upload a spreadsheet, or have your scheduling system push them to the feed API.</li>
+        <li><strong>A traveler requests a leg.</strong> Their card is authorized (not charged) and you get an email and a booking request in the portal.</li>
+        <li><strong>You confirm within 2 hours.</strong> Confirming charges the card. Declining, or not answering, releases it. Only you decide whether the flight happens.</li>
+        <li><strong>If your primary trip changes</strong>, withdraw the leg (or send it as cancelled). The traveler is refunded in full automatically.</li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Pricing</h2>
+      <p>You set your <strong>net ask</strong>: the amount you receive. We add our service fee, US federal excise tax and segment fees on top and show travelers one all-in price; nothing is added at checkout. Leave the price blank and we'll price the leg from typical rates for the aircraft type and how soon it departs (the price is shown to you in the portal before anyone books).</p>
+      <p>Your payout is never less than your ask. Prices in EUR, GBP, CHF, CAD, AED and MXN are converted at the European Central Bank's daily rate.</p>
+    </section>
+
+    <section>
+      <h2>Keeping listings current</h2>
+      <ul>
+        <li>Portal and spreadsheet listings stay on sale for <strong>7 days</strong> after you last confirm them. Click <em>All still available</em> under Empty legs to confirm everything in one go; we email you a reminder when it's due.</li>
+        <li>Feed API listings stay on sale for <strong>24 hours</strong> after your last push, so push your full list at least daily (every few hours is better).</li>
+        <li>Only aircraft in your verified fleet can be listed. Legs on any other registration are held for review.</li>
+        <li>Legs departing in less than 3 hours are not sold, so you always have time to confirm.</li>
+      </ul>
+    </section>
+
+    <section id="csv">
+      <h2>Spreadsheet upload</h2>
+      <p>Download the <a href="/empty-legs-template.csv" download>CSV template</a>, fill one row per leg and paste or upload it under <em>Post legs</em>. Columns:</p>
+      <ul>
+        <li><code>tail</code>: registration, e.g. N123AB</li>
+        <li><code>from</code>, <code>to</code>: ICAO or IATA airport codes</li>
+        <li><code>earliest</code>, <code>latest</code>: departure window, ISO-8601 with UTC offset, e.g. <code>2026-11-20T14:00:00-05:00</code> (latest is optional)</li>
+        <li><code>price</code>: your net ask in whole currency units (optional); <code>currency</code>: USD by default</li>
+        <li><code>status</code>: <code>available</code>, <code>sold</code> or <code>cancelled</code>. Re-uploading the same tail/route/time updates the leg.</li>
+        <li><code>id</code> (optional): your own reference. With it, you can change times or route and it stays the same listing.</li>
+      </ul>
+    </section>
+
+    <section id="feed">
+      <h2>Feed API (for scheduling systems)</h2>
+      <p>Your feed key and source id are issued when your account is set up. Push your current list of empty legs as JSON:</p>
+<pre>POST /api/feeds/api:&lt;your-operator-id&gt;
+Authorization: Bearer &lt;feed key&gt;
+Content-Type: application/json
+
+{ "legs": [
+  { "externalId": "TRIP-8812-R",
+    "tailNumber": "N123AB",
+    "from": "KTEB", "to": "KPBI",
+    "departureEarliest": "2026-11-20T14:00:00-05:00",
+    "departureLatest":   "2026-11-20T18:00:00-05:00",
+    "price": { "amount": 1450000, "currency": "USD" },
+    "status": "available" } ] }</pre>
+      <ul>
+        <li><code>externalId</code> is your stable id for the leg; send the same id to update it.</li>
+        <li><code>price.amount</code> is in cents (minor units); omit <code>price</code> to let us price it.</li>
+        <li>Set <code>status</code> to <code>sold</code> or <code>cancelled</code> to take a leg down. A booked leg sent as cancelled refunds the traveler.</li>
+        <li>The same endpoint accepts the CSV format with <code>Content-Type: text/csv</code>.</li>
+        <li>The response lists every record accepted or rejected, with the reason.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Messages</h2>
+      <p>Questions about a booking (passenger names, catering, FBO) arrive in the portal under <em>Messages</em> and by email. Reply in either place.</p>
+    </section>
+  </main>
+</body>
+</html>

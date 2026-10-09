@@ -202,3 +202,6 @@ table.data td { padding: 10px; border-bottom: 1px solid var(--line); vertical-al
   nav.links { gap: 12px; font-size: 0.82rem; }
   .live { font-size: 0; gap: 0; }
 }
+
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+code.copy { user-select: all; word-break: break-all; }

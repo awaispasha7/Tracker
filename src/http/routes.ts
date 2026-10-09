@@ -8,8 +8,9 @@ import { getAircraftType } from '../reference/aircraft-types.ts';
 import { AGREEMENT_HASH, AGREEMENT_TEXT, AGREEMENT_VERSION } from '../booking/agreement.ts';
 import { isListable } from '../inventory/search.ts';
 import { runContractCheck } from '../integrations/aviapages/contract-check.ts';
+import { marketStatus, refreshFx } from '../pricing/market-data.ts';
 
-export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: string }): Router {
+export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: string; demo?: boolean; bookingsOpen?: boolean }): Router {
   const r = new Router();
   const now = () => app.clock.now();
 
@@ -112,6 +113,7 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
   });
 
   r.on('POST', '/api/bookings', async ({ body, req, res }) => {
+    if (opts.bookingsOpen === false) throw new AppError(503, 'bookings_closed', 'Online booking is not open yet. Set up an alert and we will tell you when it is.');
     const key = String(req.headers['idempotency-key'] ?? '');
     const input = body as Parameters<App['bookings']['createBooking']>[0];
     const booking = await app.bookings.createBooking(
@@ -132,7 +134,16 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
   r.on('GET', '/api/config', () => ({
     aviapages: app.aviapages ? { enabled: true, mode: app.aviapages.mode } : { enabled: false, mode: 'off' },
     charterQuotes: app.charters.enabled,
+    demo: opts.demo ?? false,
+    bookingsOpen: opts.bookingsOpen !== false,
   }));
+
+  // ---------- public: operator applications ----------
+  r.on('POST', '/api/operator-applications', ({ body, res }) => {
+    const out = app.onboarding.apply(body as Parameters<App['onboarding']['apply']>[0]);
+    res.statusCode = 201;
+    return out;
+  });
 
   // ---------- public: custom charter requests ----------
   r.on('POST', '/api/charter-requests', async ({ body, res }) => {
@@ -228,6 +239,8 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     const isCsv = String(ctx.req.headers['content-type'] ?? '').includes('text/csv');
     return app.ingest.ingest(`portal:${op.id}`, ctx.body, isCsv ? 'csv' : undefined);
   });
+
+  r.on('POST', '/api/operator/legs/reconfirm', async (ctx) => app.ingest.reconfirm(requireOperator(ctx).id));
 
   r.on('POST', '/api/operator/legs/:id/withdraw', async (ctx) => {
     const op = requireOperator(ctx);
@@ -412,7 +425,98 @@ export function buildRouter(app: App, opts: { adminKey: string; inboundToken?: s
     if (b?.fuelCentsPerGal) app.market.set('fuel_cents_per_gal', b.fuelCentsPerGal, t);
     for (const [ccy, v] of Object.entries(b?.fx ?? {})) app.market.set(`fx_usd_per_${ccy.toUpperCase()}`, v, t);
     app.search.invalidate();
-    return { ok: true };
+    return { ok: true, ...marketStatus(app.market) };
+  });
+
+  r.on('GET', '/api/admin/market', (ctx) => {
+    requireAdmin(ctx);
+    const cfg = app.pricing.config;
+    return { ...marketStatus(app.market), fuelValidDays: Math.round(cfg.maxFuelAgeMs / 86_400_000), fxValidHours: Math.round(cfg.maxMarketAgeMs / 3_600_000) };
+  });
+
+  r.on('POST', '/api/admin/market/refresh-fx', async (ctx) => {
+    requireAdmin(ctx);
+    const out = await refreshFx(app.market, app.clock);
+    if (out.ok) app.search.invalidate();
+    return { ...out, ...marketStatus(app.market) };
+  });
+
+  // ---------- admin: operator onboarding ----------
+  r.on('GET', '/api/admin/operators', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.listOperators();
+  });
+
+  r.on('GET', '/api/admin/operators/:id', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.operatorDetail(ctx.params.id);
+  });
+
+  r.on('POST', '/api/admin/operators', (ctx) => {
+    requireAdmin(ctx);
+    const b = ctx.body as Parameters<App['onboarding']['createOperator']>[0] & { prospectId?: string };
+    ctx.res.statusCode = 201;
+    return app.onboarding.createOperator(b, b?.prospectId);
+  });
+
+  r.on('PATCH', '/api/admin/operators/:id', (ctx) => {
+    requireAdmin(ctx);
+    const out = app.onboarding.updateOperator(ctx.params.id, ctx.body as Parameters<App['onboarding']['updateOperator']>[1]);
+    app.search.invalidate();
+    return out;
+  });
+
+  r.on('POST', '/api/admin/operators/:id/keys', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.rotateKey(ctx.params.id, (ctx.body as { which?: 'portal' | 'feed' })?.which ?? 'portal');
+  });
+
+  r.on('POST', '/api/admin/operators/:id/aircraft', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.addAircraft(ctx.params.id, ctx.body as Parameters<App['onboarding']['addAircraft']>[1]);
+  });
+
+  r.on('DELETE', '/api/admin/operators/:id/aircraft/:tail', (ctx) => {
+    requireAdmin(ctx);
+    const out = app.onboarding.removeAircraft(ctx.params.id, ctx.params.tail);
+    app.search.invalidate();
+    return out;
+  });
+
+  r.on('GET', '/api/admin/aircraft-types', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.aircraftTypes();
+  });
+
+  // ---------- admin: FAA Part 135 list + prospects ----------
+  r.on('POST', '/api/admin/faa/import', (ctx) => {
+    requireAdmin(ctx);
+    if (!ctx.body) throw new AppError(400, 'empty_upload', 'Upload the FAA Part 135 spreadsheet (.xlsx or .csv)');
+    return app.onboarding.importFaa(ctx.body as Buffer | string, ctx.query.get('filename') ?? '');
+  });
+
+  r.on('GET', '/api/admin/faa/stats', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.faaStats();
+  });
+
+  r.on('GET', '/api/admin/prospects', (ctx) => {
+    requireAdmin(ctx);
+    const q = ctx.query;
+    return app.onboarding.prospects({
+      q: q.get('q') ?? undefined, status: q.get('status') || undefined, category: q.get('category') || undefined,
+      minJets: num(q.get('minJets')), limit: num(q.get('limit')),
+    });
+  });
+
+  r.on('GET', '/api/admin/prospects/:id', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.prospect(ctx.params.id);
+  });
+
+  r.on('PATCH', '/api/admin/prospects/:id', (ctx) => {
+    requireAdmin(ctx);
+    return app.onboarding.updateProspect(ctx.params.id, ctx.body as Parameters<App['onboarding']['updateProspect']>[1]);
   });
 
   return r;

@@ -51,6 +51,9 @@ export interface Operator {
 }
 
 export interface OperatorContact {
+  /** FAA certificate designator (e.g. "ABCA") or other AOC number, for verification. */
+  certificateNumber?: string | null;
+  contactName?: string | null;
   email?: string | null;
   phone?: string | null;
   website?: string | null;

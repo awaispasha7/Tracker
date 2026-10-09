@@ -213,6 +213,7 @@ await step('Custom charter: search aircraft, request quotes from two operators',
 
 await step('Ops console: integrations dashboard and live contract check', async () => {
   const a = await adminPage();
+  await a.click('[data-tab=integrations]');
   await a.waitForSelector('text=Operators learned');
   await a.click('[data-act=check]');
   await a.waitForSelector('text=passed');
@@ -265,13 +266,123 @@ await step('Route alert signup', async () => {
   await traveler.waitForSelector('text=Alert created');
 });
 
+await step('Operator applies to list empty legs', async () => {
+  const p = await newPage();
+  await p.goto(`${BASE}/operator`);
+  const f = '#apply-form';
+  await p.fill(`${f} [name=company]`, 'Summit Air Charter');
+  await p.fill(`${f} [name=certificateNumber]`, 'SUMA123B');
+  await p.fill(`${f} [name=name]`, 'Lee Park');
+  await p.fill(`${f} [name=email]`, 'lee@summit.example');
+  await p.fill(`${f} [name=fleet]`, '2x Citation XLS');
+  await p.click(`${f} button`);
+  await p.waitForSelector('#apply-done:not([hidden])');
+  if (await p.isVisible('#demo-keys') !== true) throw new Error('demo key hint hidden in demo mode');
+  await p.screenshot({ path: `${OUT}/11-operator-apply.png` });
+  await p.close();
+});
+
+const FAA_CSV = `Part 135 Certificate Holder Name,Certificate Designator,FAA Certificate Holding District Office,Aircraft Registration Number,Aircraft Serial Number,Aircraft Make/Model/Series
+"Summit Air Charter, LLC",SUMA123B,EA03,N510SA,560-6011,CE-560XL
+"Summit Air Charter, LLC",SUMA123B,EA03,N511SA,560-6012,CE-560XL
+Harbor Jets Inc,HBRA456C,SO15,N900HJ,5111,BD-100-1A10
+`;
+let newOperatorKey = '';
+await step('Ops: import FAA Part 135 list, work the prospect, onboard operator and fleet', async () => {
+  const a = await adminPage();
+  await a.click('[data-tab=prospects]');
+  await a.waitForSelector('#faa-file');
+  await a.setInputFiles('#faa-file', { name: 'part135.csv', mimeType: 'text/csv', buffer: Buffer.from(FAA_CSV) });
+  await a.waitForSelector('text=2 certificate holders, 3 aircraft loaded');
+  await a.fill('#pf [name=q]', 'summit');
+  await a.click('#pf button');
+  await a.waitForFunction(() => document.querySelectorAll('[data-ob=open-prospect]').length === 1);
+  await a.click('[data-ob=open-prospect]');
+  await a.waitForSelector('#prospect');
+  if (!(await a.isVisible('text=certificate matches the FAA list'))) throw new Error('application not attached to the FAA prospect');
+  await a.fill('#prospect-form [name=notes]', 'Posts legs on their website weekly');
+  await a.click('#prospect-form button');
+  await a.waitForSelector('text=Saved.');
+  await a.screenshot({ path: `${OUT}/12-admin-prospects.png`, fullPage: true });
+  await a.click('[data-ob=onboard]');
+  await a.waitForSelector('#op-create');
+  if ((await a.inputValue('#op-create [name=email]')) !== 'lee@summit.example') throw new Error('prospect contact not carried over');
+  await a.click('#op-create button:not([type=button])');
+  await a.waitForSelector('#keys-box');
+  newOperatorKey = (await a.textContent('#keys-box code.copy'))!.trim();
+  await a.click('[data-ob=dismiss-keys]');
+  await a.waitForSelector('#op-detail');
+  await a.click('[data-ob=prefill-ac][data-tail=N510SA]');
+  await a.waitForFunction(() => (document.querySelector('#ac-add [name=tail]') as HTMLInputElement | null)?.value === 'N510SA');
+  await a.fill('#ac-add [name=homeBase]', 'TEB');
+  await a.click('#ac-add button');
+  await a.waitForSelector('text=N510SA added.');
+  await a.waitForSelector('text=on certificate');
+  await a.fill('#ac-add [name=tail]', 'N900HJ');
+  await a.selectOption('#ac-add [name=typeCode]', 'CL35');
+  await a.fill('#ac-add [name=seats]', '9');
+  await a.fill('#ac-add [name=homeBase]', 'TEB');
+  await a.click('#ac-add button');
+  await a.waitForSelector('#ac-warning >> text=is on certificate HBRA456C, not SUMA123B');
+  if ((await a.inputValue('#ac-add [name=tail]')) !== 'N900HJ') throw new Error('form not kept after the warning');
+  await a.screenshot({ path: `${OUT}/13-admin-operator.png`, fullPage: true });
+  await a.click('[data-tab=market]');
+  await a.waitForSelector('#fuel-form');
+  await a.fill('#fuel-form [name=fuel]', '6.25');
+  await a.click('#fuel-form button');
+  await a.waitForSelector('text=Fuel index updated.');
+  await a.close();
+});
+
+await step('New operator signs in, posts a leg; traveler books it; operator confirms', async () => {
+  if (!newOperatorKey.startsWith('opk_')) throw new Error(`no portal key captured (${newOperatorKey})`);
+  const op = await newPage();
+  await op.goto(`${BASE}/operator`);
+  await op.fill('#key', newOperatorKey);
+  await op.click('#login-form button');
+  await op.waitForSelector('text=Summit Air Charter');
+  await op.click('[data-tab=post]');
+  const dep = new Date(Date.now() + 9 * 86_400_000);
+  const local = (d: Date) => new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  await op.fill('#p-from', 'TEB');
+  await op.fill('#p-to', 'ASE');
+  await op.fill('#p-early', local(dep));
+  await op.fill('#p-late', local(new Date(dep.getTime() + 3 * 3_600_000)));
+  await op.fill('#p-price', '9800');
+  await op.click('#post-one button');
+  await op.waitForSelector('text=Accepted 1, rejected 0');
+  await op.click('[data-tab=legs]');
+  await op.waitForSelector('text=listed');
+  await op.click('#reconfirm');
+  await op.waitForSelector('text=confirmed for another 7 days');
+
+  const hits = (await api('/api/search?from=TEB&to=ASE')).results.filter((h: { operator: { name: string } }) => h.operator.name === 'Summit Air Charter');
+  if (hits.length !== 1) throw new Error(`expected the new leg in search, got ${hits.length}`);
+  const agreement = await api('/api/agreement');
+  const quote = await api('/api/quotes', { method: 'POST', body: { legId: hits[0].legId, pax: 2 } });
+  const res = await fetch(`${BASE}/api/bookings`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': `e2e-${Date.now()}` },
+    body: JSON.stringify({ quoteId: quote.quoteId, contact: { name: 'Kit Traveler', email: 'kit@example.com' }, passengers: [{ name: 'Kit' }, { name: 'Sam' }],
+      paymentToken: 'tok_visa', agreement: { accepted: true, signedName: 'Kit Traveler', version: agreement.version } }),
+  });
+  const booking = await res.json();
+  if (booking.status !== 'authorized') throw new Error(JSON.stringify(booking));
+  await op.click('[data-tab=bookings]');
+  await op.click(`[data-confirm="${booking.id}"]`);
+  await op.waitForSelector('text=Confirmed — traveler charged.');
+  await op.screenshot({ path: `${OUT}/14-new-operator.png`, fullPage: true });
+  const after = await api(`/api/bookings/${booking.id}?email=kit@example.com`);
+  if (after.status !== 'confirmed') throw new Error(`booking is ${after.status}`);
+  await op.close();
+});
+
 await step('Every page fits a phone screen (no horizontal scroll)', async () => {
   const m = await newPage(390, 844);
   await m.goto(`${BASE}/admin`);
   await m.fill('#key', ADMIN);
   await m.click('#login-form button');
-  await m.waitForSelector('text=Operators learned');
-  for (const path of ['/', '/charter', '/operator', '/admin']) {
+  await m.waitForSelector('#ops:not([hidden])');
+  for (const path of ['/', '/charter', '/operator', '/operator-guide.html', '/admin']) {
     await m.goto(BASE + path);
     await m.waitForLoadState('load');
     await m.waitForTimeout(300);
@@ -283,6 +394,45 @@ await step('Every page fits a phone screen (no horizontal scroll)', async () => 
   await m.waitForSelector('.leg');
   await m.screenshot({ path: `${OUT}/10-mobile.png` });
   await m.close();
+});
+
+await step('Production mode: refuses a weak admin key; no demo data, hints or Aviapages', async () => {
+  const run = (env: Record<string, string>, port: number) => spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'src/server.ts', '--production'], {
+    env: { ...process.env, PORT: String(port), DB_PATH: join(tmpdir(), `e2e-prod-${port}.db`), AVIAPAGES_API_KEY: '', AVIAPAGES_MODE: '', DEMO: '', ...env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const weak = run({ ADMIN_KEY: 'dev_admin_key' }, PORT + 1);
+  const code = await new Promise<number | null>((r) => weak.on('exit', r));
+  if (code === 0) throw new Error('production server started with the dev admin key');
+
+  const port = PORT + 2;
+  const prod = run({ ADMIN_KEY: 'e2e_production_admin_key' }, port);
+  try {
+    const base = `http://localhost:${port}`;
+    for (let i = 0; i < 120; i++) {
+      try { if ((await fetch(`${base}/api/health`)).ok) break; } catch { /* starting */ }
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    const cfg = await (await fetch(`${base}/api/config`)).json();
+    if (cfg.demo || cfg.aviapages.enabled || cfg.charterQuotes) throw new Error(JSON.stringify(cfg));
+    if ((await (await fetch(`${base}/api/search?from=TEB`)).json()).results.length) throw new Error('demo legs in production');
+    if ((await fetch(`${base}/api/admin/operators`, { headers: { authorization: 'Bearer dev_admin_key' } })).status !== 401) throw new Error('dev admin key accepted');
+    if (cfg.bookingsOpen) throw new Error('bookings open on simulated payments');
+    const b = await fetch(`${base}/api/bookings`, { method: 'POST', headers: { 'content-type': 'application/json', 'idempotency-key': 'e2e-prod-0001' }, body: '{}' });
+    if (b.status !== 503) throw new Error(`booking on simulated payments returned ${b.status}`);
+    const p = await newPage();
+    await p.goto(`${base}/operator`);
+    await p.waitForLoadState('load');
+    await p.waitForTimeout(300);
+    if (await p.isVisible('#demo-keys')) throw new Error('demo keys shown in production');
+    await p.goto(base);
+    await p.waitForTimeout(300);
+    if (await p.isVisible('header [data-charter]')) throw new Error('custom charter link shown without Aviapages');
+    await p.close();
+  } finally {
+    prod.kill();
+    rmSync(join(tmpdir(), `e2e-prod-${port}.db`), { force: true });
+  }
 });
 
 await step('No browser console errors on any page', async () => {

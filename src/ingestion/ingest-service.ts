@@ -97,6 +97,30 @@ export class IngestService {
   }
 
   /**
+   * The operator says everything they have listed is still on ("still available" in the portal):
+   * their latest report for each live leg is repeated as a fresh one, so listings posted once,
+   * weeks ahead, stay sellable without retyping them.
+   */
+  async reconfirm(operatorId: string): Promise<{ reconfirmed: number }> {
+    const now = this.clock.now();
+    const touched = new Set<string>();
+    const sources = this.fleet.listSources().filter((s) => s.operatorId === operatorId);
+    this.db.tx(() => {
+      for (const source of sources) {
+        for (const { externalId, legId } of this.legs.linksForSource(source.id)) {
+          const last = this.legs.latestObservation(source.id, externalId);
+          if (!last || last.status !== 'available' || last.departLatest <= now) continue;
+          this.legs.insertObservation({ ...last, receivedAt: now }, { reconfirmed: true });
+          touched.add(legId);
+        }
+      }
+    });
+    const effects = this.reconcileLegs(touched, now);
+    await this.applyEffects(effects);
+    return { reconfirmed: touched.size };
+  }
+
+  /**
    * A source stopped listing these records (e.g. they vanished from a complete full sync). Recorded
    * as fresh "unavailable" reports from that source, so reconciliation decides what it means.
    */

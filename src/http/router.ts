@@ -20,6 +20,8 @@ interface Route {
 }
 
 const MAX_BODY = 1_000_000;
+/** Spreadsheet uploads (the FAA Part 135 list is a few MB). */
+const MAX_UPLOAD = 25_000_000;
 
 export class Router {
   private routes: Route[] = [];
@@ -69,16 +71,19 @@ export class Router {
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
+  const type = req.headers['content-type'] ?? '';
+  const binary = type.includes('application/octet-stream') || type.includes('spreadsheetml');
+  const limit = binary ? MAX_UPLOAD : MAX_BODY;
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new AppError(413, 'payload_too_large', 'Request body too large');
+    if (size > limit) throw new AppError(413, 'payload_too_large', 'Request body too large');
     chunks.push(chunk as Buffer);
   }
+  if (binary) return size ? Buffer.concat(chunks) : undefined;
   const text = Buffer.concat(chunks).toString('utf8');
   if (!text) return undefined;
-  const type = req.headers['content-type'] ?? '';
   if (type.includes('application/json')) {
     try {
       return JSON.parse(text);

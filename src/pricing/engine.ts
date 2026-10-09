@@ -106,7 +106,7 @@ export class PricingEngine {
     const billableHours = Math.max(flight.blockHours, cfg.minBillableHours);
 
     const fuel = this.market.get('fuel_cents_per_gal');
-    check('MARKET_FRESH', !!fuel && now - fuel.asOf <= cfg.maxMarketAgeMs, 'fuel index missing or stale');
+    check('MARKET_FRESH', !!fuel && now - fuel.asOf <= cfg.maxFuelAgeMs, 'fuel index missing or stale');
     const fuelCents = fuel?.value ?? cfg.baselineFuelCentsPerGal;
     const fuelSurcharge = round(Math.max(0, fuelCents - cfg.baselineFuelCentsPerGal) * type.fuelBurnGph * flight.blockHours);
     const handling = cfg.handlingCents[from.feeTier] + cfg.handlingCents[to.feeTier];

@@ -1,0 +1,3 @@
+tail,from,to,earliest,latest,price,currency,status
+N123AB,TEB,PBI,2026-11-20T14:00:00-05:00,2026-11-20T18:00:00-05:00,14500,USD,available
+N123AB,PBI,TEB,2026-11-23T09:00:00-05:00,,,USD,available

@@ -8,17 +8,32 @@ import { consoleSender } from './alerts/outbox.ts';
 import { DEV_ADMIN_KEY, seedDemo, generateSpecs, seedReference, startSimulator } from './dev/seed.ts';
 import { AviapagesMock } from './integrations/aviapages/mock.ts';
 import { HOUR, MINUTE, systemClock } from './domain/types.ts';
+import { refreshFx } from './pricing/market-data.ts';
+
+// Production: a clean marketplace with real operators only. Demo: seeded fake operators, a feed
+// simulator and the Aviapages mock, so every feature can be tried without accounts.
+const PRODUCTION = process.env.NODE_ENV === 'production' || process.argv.includes('--production');
+const DEMO = process.env.DEMO ? process.env.DEMO === '1' : !PRODUCTION;
 
 const PORT = Number(process.env.PORT ?? 3000);
 const DB_PATH = process.env.DB_PATH ?? 'data/emptylegs.db';
-const ADMIN_KEY = process.env.ADMIN_KEY ?? DEV_ADMIN_KEY;
-const SIMULATE = process.env.SIMULATE !== '0';
-const INBOUND_TOKEN = process.env.INBOUND_EMAIL_TOKEN ?? 'dev_inbound_token';
+const PUBLIC_URL = (process.env.PUBLIC_URL ?? '').replace(/\/$/, '');
+const ADMIN_KEY = process.env.ADMIN_KEY ?? (PRODUCTION ? '' : DEV_ADMIN_KEY);
+if (PRODUCTION && (ADMIN_KEY.length < 16 || ADMIN_KEY === DEV_ADMIN_KEY)) {
+  throw new Error('Production needs ADMIN_KEY set to a secret of at least 16 characters.');
+}
+const SIMULATE = DEMO && process.env.SIMULATE !== '0';
+// Payments are simulated (MockPaymentProvider) until a real provider is wired in; production takes
+// no bookings on simulated cards unless explicitly allowed (a staging site).
+const BOOKINGS_OPEN = !PRODUCTION || process.env.ALLOW_SIMULATED_PAYMENTS === '1';
+// Empty token = inbound email webhook disabled.
+const INBOUND_TOKEN = process.env.INBOUND_EMAIL_TOKEN ?? (PRODUCTION ? '' : 'dev_inbound_token');
 const PUBLIC_DIR = fileURLToPath(new URL('../public/', import.meta.url));
 
 // ---------- Aviapages: live with a key, otherwise a mock so every feature can be exercised ----------
 const AVP_KEY = process.env.AVIAPAGES_API_KEY ?? '';
-const AVP_MODE = (process.env.AVIAPAGES_MODE ?? (AVP_KEY ? 'live' : 'mock')) as AviapagesOptions['mode'];
+const AVP_MODE = (process.env.AVIAPAGES_MODE || (AVP_KEY ? 'live' : DEMO ? 'mock' : 'off')) as AviapagesOptions['mode'];
+if (!['live', 'mock', 'off'].includes(AVP_MODE)) throw new Error(`AVIAPAGES_MODE must be live, mock or off (got "${AVP_MODE}")`);
 if (AVP_MODE === 'live' && !AVP_KEY) throw new Error('AVIAPAGES_MODE=live requires AVIAPAGES_API_KEY');
 const mock = AVP_MODE === 'mock'
   ? new AviapagesMock({ clock: systemClock, baseUrl: `http://localhost:${PORT}/mock-aviapages`, replyDelayMs: Number(process.env.AVIAPAGES_MOCK_REPLY_SECONDS ?? 90) * 1000 })
@@ -44,21 +59,30 @@ const app = createApp({
     pollEveryMs: minutes('AVIAPAGES_POLL_MINUTES', mock ? 1 * MINUTE : 3 * MINUTE),
     replyToAddress: process.env.REPLY_TO_ADDRESS ?? 'ops@emptylegtracker.example',
   },
+  opsEmail: process.env.OPS_EMAIL ?? process.env.REPLY_TO_ADDRESS,
 });
 
-const firstRun = app.fleet.listOperators().length === 0;
-const seeded = firstRun ? await seedDemo(app) : { ...seedReference(app, app.clock.now()), specs: generateSpecs(app.clock.now()) };
-if (firstRun) console.log(`Seeded demo marketplace into ${DB_PATH}`);
+let seeded: { operatorKeys: Record<string, string>; specs: ReturnType<typeof generateSpecs> } = { operatorKeys: {}, specs: [] };
+if (DEMO) {
+  const firstRun = app.fleet.listOperators().length === 0;
+  seeded = firstRun ? await seedDemo(app) : { ...seedReference(app, app.clock.now()), specs: generateSpecs(app.clock.now()) };
+  if (firstRun) console.log(`Seeded demo marketplace into ${DB_PATH}`);
+} else {
+  // A starting fuel index so prices work on day one; ops adjust it in the console (Market).
+  if (!app.market.get('fuel_cents_per_gal')) app.market.set('fuel_cents_per_gal', Number(process.env.FUEL_CENTS_PER_GAL ?? 600), app.clock.now());
+  const fx = await refreshFx(app.market, app.clock);
+  console.log(fx.ok ? `FX rates updated from ECB (${fx.updated.join(', ')})` : `FX refresh failed: ${fx.error} (non-USD operator prices stay hidden until it succeeds)`);
+}
 if (app.aviapages) {
   const r = await app.aviapages.sync.tick();
   if (r) console.log(`Aviapages (${AVP_MODE}) ${r.kind} sync: ${r.received} listings, ${r.ingested} ingested${r.error ? `, error: ${r.error}` : ''}`);
 }
 
-const router = buildRouter(app, { adminKey: ADMIN_KEY, inboundToken: INBOUND_TOKEN });
+const router = buildRouter(app, { adminKey: ADMIN_KEY, inboundToken: INBOUND_TOKEN, demo: DEMO, bookingsOpen: BOOKINGS_OPEN });
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
-  '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml', '.json': 'application/json', '.ico': 'image/x-icon', '.csv': 'text/csv; charset=utf-8',
 };
 
 /** Mock mode only: stand-in aircraft photos so the UI shows images the way live data will. */
@@ -100,7 +124,9 @@ const server = createServer(async (req, res) => {
 // Background work. Each job logs and carries on; one failure never stops the others.
 const every = (ms: number, name: string, fn: () => Promise<unknown>) => setInterval(() => fn().catch((e) => console.error(`[${name}]`, e)), ms);
 const timers = [
+  every(6 * HOUR, 'fx', () => (DEMO ? Promise.resolve() : refreshFx(app.market, app.clock))),
   every(30_000, 'sweep', () => app.bookings.sweep()),
+  every(6 * HOUR, 'reconfirm-reminders', () => Promise.resolve(app.onboarding.reconfirmReminders(PUBLIC_URL))),
   every(60_000, 'refresh', () => app.ingest.refresh()),
   every(5_000, 'outbox', () => app.outbox.drain(consoleSender, app.clock.now())),
   every(60_000, 'aviapages-sync', async () => {
@@ -132,13 +158,15 @@ if (mock) {
 const stopSim = SIMULATE ? startSimulator(app, seeded.specs, 20_000) : () => {};
 
 server.listen(PORT, () => {
-  console.log(`\nEmpty-leg marketplace on http://localhost:${PORT}`);
+  console.log(`\nEmpty-leg marketplace on http://localhost:${PORT}  [${PRODUCTION ? 'PRODUCTION' : 'development'}${DEMO ? ', demo data' : ''}]`);
   console.log(`  traveler site    http://localhost:${PORT}/`);
-  console.log(`  custom charter   http://localhost:${PORT}/charter`);
-  console.log(`  operator portal  http://localhost:${PORT}/operator   (try key: ${seeded.operatorKeys.op_skyline})`);
-  console.log(`  ops console      http://localhost:${PORT}/admin      (key: ${ADMIN_KEY === DEV_ADMIN_KEY ? DEV_ADMIN_KEY : '$ADMIN_KEY'})`);
+  console.log(`  custom charter   http://localhost:${PORT}/charter${app.aviapages ? '' : '   (off: needs Aviapages)'}`);
+  console.log(`  operator portal  http://localhost:${PORT}/operator${DEMO ? `   (try key: ${seeded.operatorKeys.op_skyline})` : ''}`);
+  console.log(`  ops console      http://localhost:${PORT}/admin${ADMIN_KEY === DEV_ADMIN_KEY ? `      (key: ${DEV_ADMIN_KEY})` : ''}`);
   console.log(`  Aviapages        ${AVP_MODE}${AVP_MODE === 'mock' ? ' (set AVIAPAGES_API_KEY to go live)' : ''}`);
-  console.log(`  feed simulator   ${SIMULATE ? 'on (SIMULATE=0 to disable)' : 'off'}\n`);
+  if (!INBOUND_TOKEN) console.log('  inbound email    off (set INBOUND_EMAIL_TOKEN to accept operator email replies)');
+  console.log(`  feed simulator   ${SIMULATE ? 'on (SIMULATE=0 to disable)' : 'off'}`);
+  console.log(`  bookings         ${BOOKINGS_OPEN ? (PRODUCTION ? 'OPEN on SIMULATED payments (ALLOW_SIMULATED_PAYMENTS=1)' : 'open (simulated payments)') : 'closed: connect a real payment provider (docs/PRODUCTION.md)'}\n`);
 });
 
 const shutdown = () => {

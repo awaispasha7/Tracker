@@ -1,5 +1,7 @@
 import { api, esc, money, when, windowText, toast, airportPicker, LOGO } from './common.js';
 
+let config = {};
+
 const $ = (s) => document.querySelector(s);
 $('#brand').insertAdjacentHTML('afterbegin', LOGO);
 
@@ -191,7 +193,7 @@ async function showLeg(legId, paxOverride) {
       </div>
       ${d.operator?.confirmation === 'on_request' ? `<div class="notice info">We'll send your request to ${esc(d.operator.name)} the moment you book. Your card is only charged once they confirm, usually within a few hours.</div>` : ''}
       ${leg.kind === 'charter_offer' ? '' : `<div class="notice warn">Empty legs follow the operator's primary trip. The time can shift within the window, or the flight can cancel (full refund). Keep a refundable backup.</div>`}
-      <button id="get-quote">Continue to book</button>`
+      ${config.bookingsOpen === false ? '<div class="notice info">Online booking opens soon. Create a route alert below and we will email you when flights like this are bookable.</div>' : '<button id="get-quote">Continue to book</button>'}`
     : `<div class="notice bad">${d.unavailableReason === 'reserved' ? 'Someone has just requested this flight.' : 'This flight is not available to book right now.'}</div>`}
   `;
   $('#get-quote')?.addEventListener('click', () => startBooking(leg, pax));
@@ -335,3 +337,8 @@ $('#alert-form').addEventListener('submit', async (e) => {
     toast(err.message);
   }
 });
+
+api('/api/config').then((c) => {
+  config = c;
+  document.querySelectorAll('[data-charter]').forEach((el) => { el.hidden = !c.charterQuotes; });
+}).catch(() => {});

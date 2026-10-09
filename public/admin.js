@@ -1,9 +1,10 @@
 import { api, esc, money, when, toast, LOGO } from './common.js';
+import * as onboarding from './admin-onboarding.js';
 
 const $ = (s) => document.querySelector(s);
 $('#brand').insertAdjacentHTML('afterbegin', LOGO);
 let key = sessionStorage.getItem('adminKey') || '';
-let tab = 'integrations';
+let tab = 'operators';
 let openThread = null;
 
 const dur = (ms) => (ms == null ? '—' : ms >= 3_600_000 ? `${(ms / 3_600_000).toFixed(1)}h` : `${Math.round(ms / 60_000)}m`);
@@ -14,9 +15,13 @@ const statusTag = (s) => {
 };
 
 const views = {
+  operators: () => onboarding.operators(key),
+  prospects: () => onboarding.prospects(key),
+  market: () => onboarding.market(key),
+
   async integrations() {
     const { aviapages: a } = await api('/api/admin/integrations', { key });
-    if (!a.enabled) return '<div class="card empty">Aviapages integration is off. Set <code>AVIAPAGES_API_KEY</code> (live) or <code>AVIAPAGES_MODE=mock</code> and restart.</div>';
+    if (!a.enabled) return '<div class="card empty">Aviapages integration is off: inventory comes from operators you sign directly (Operators tab). To add the Aviapages network later, set <code>AVIAPAGES_API_KEY</code> and restart.</div>';
     const s = a.sync;
     const check = a.lastCheck;
     return `
@@ -203,12 +208,31 @@ async function signIn(k) {
 }
 
 $('#login-form').addEventListener('submit', (e) => { e.preventDefault(); signIn($('#key').value.trim()).catch((err) => toast(err.message)); });
+function selectTab(name) {
+  tab = name;
+  document.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
+}
 document.querySelector('.tabs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-tab]');
   if (!b) return;
-  tab = b.dataset.tab;
-  document.querySelectorAll('[data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t === b)));
+  selectTab(b.dataset.tab);
   render();
+});
+
+$('#panel').addEventListener('submit', async (e) => {
+  if (e.target.id === 'compose') return;
+  e.preventDefault();
+  const btn = e.target.querySelector('button:not([type=button])');
+  if (btn) btn.disabled = true;
+  try {
+    if (await onboarding.onSubmit(e.target, key)) await render();
+  } catch (err) { toast(err.message); }
+  if (btn?.isConnected) btn.disabled = false;
+});
+$('#panel').addEventListener('change', async (e) => {
+  try {
+    if (await onboarding.onChange(e.target, key)) await render();
+  } catch (err) { toast(err.message); }
 });
 
 $('#panel').addEventListener('click', async (e) => {
@@ -218,14 +242,19 @@ $('#panel').addEventListener('click', async (e) => {
   if (g) {
     e.preventDefault();
     openThread = g.dataset.gotoThread;
-    tab = 'inbox';
-    document.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.tab === 'inbox')));
+    selectTab('inbox');
     return render();
   }
   const btn = e.target.closest('button');
   if (!btn) return;
   const act = btn.dataset.act;
   try {
+    if (btn.dataset.ob) {
+      const out = await onboarding.onClick(btn, key);
+      if (!out) return;
+      if (typeof out === 'string') selectTab(out);
+      return render();
+    }
     if (act === 'sync-full' || act === 'sync-incremental') {
       btn.disabled = true;
       const r = await api('/api/admin/integrations/aviapages/sync', { method: 'POST', key, body: { kind: act === 'sync-full' ? 'full' : 'incremental' } });

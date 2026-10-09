@@ -277,6 +277,43 @@ CREATE TABLE IF NOT EXISTS charter_offers (
 );
 CREATE INDEX IF NOT EXISTS charter_offers_by_request ON charter_offers(request_id);
 
+-- FAA Part 135 certificate holders and the aircraft on their certificates (replaced on each import).
+CREATE TABLE IF NOT EXISTS faa_operators (
+  designator TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  district_office TEXT,
+  aircraft_count INTEGER NOT NULL,
+  jet_count INTEGER NOT NULL,
+  categories TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS faa_aircraft (
+  tail TEXT PRIMARY KEY,
+  designator TEXT NOT NULL,
+  serial TEXT,
+  model TEXT NOT NULL,
+  category TEXT,
+  suggested_type TEXT
+);
+CREATE INDEX IF NOT EXISTS faa_aircraft_by_designator ON faa_aircraft(designator);
+
+-- Sales pipeline: FAA operators we may sign, and operators who applied. Survives FAA re-imports.
+CREATE TABLE IF NOT EXISTS prospects (
+  id TEXT PRIMARY KEY,
+  designator TEXT,
+  company TEXT NOT NULL,
+  source TEXT NOT NULL,
+  status TEXT NOT NULL,
+  contact_name TEXT,
+  contact_email TEXT,
+  contact_phone TEXT,
+  notes TEXT,
+  application TEXT,
+  operator_id TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS prospects_by_designator ON prospects(designator) WHERE designator IS NOT NULL;
+
 -- Transactional outbox: written in the same transaction as the state change, delivered later.
 CREATE TABLE IF NOT EXISTS notifications (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

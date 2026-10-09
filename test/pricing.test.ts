@@ -98,7 +98,7 @@ test('guardrails: stale supply, stale market data, capacity, lead time, low conf
   assert.deepEqual(codes({ ...leg, departEarliest: T0 + 2 * HOUR, departLatest: T0 + 2 * HOUR }), ['LEAD_TIME']);
   clock.advance(7 * HOUR);
   assert.ok(codes(leg).includes('LEG_FRESH'), 'operator has not re-confirmed in 7h');
-  app.market.set('fuel_cents_per_gal', 600, clock.now() - 3 * DAY);
+  app.market.set('fuel_cents_per_gal', 600, clock.now() - 31 * DAY);
   assert.ok(codes({ ...leg, lastSeenAt: clock.now() }).includes('MARKET_FRESH'));
 });
 

@@ -20,6 +20,7 @@ import { EmptyLegSync, type SyncConfig } from './integrations/aviapages/sync.ts'
 import { CommsService, type CommsConfig } from './comms/comms.ts';
 import { Calculators } from './integrations/aviapages/calculators.ts';
 import { CharterRequestService } from './charter/charter-requests.ts';
+import { OnboardingService } from './onboarding/onboarding.ts';
 
 export interface AviapagesOptions {
   /** 'live' calls the real API with apiKey; 'mock' uses the in-process mock; 'off' disables the integration. */
@@ -42,6 +43,8 @@ export interface AppOptions {
   payments?: PaymentProvider;
   pricing?: Partial<PricingConfig>;
   booking?: Partial<BookingConfig>;
+  /** Where operator applications are sent. */
+  opsEmail?: string;
 }
 
 export function createApp(opts: AppOptions = {}) {
@@ -73,7 +76,8 @@ export function createApp(opts: AppOptions = {}) {
   pricing.insights = calculators;
   const comms = new CommsService({ db, fleet, legs, market, bookings, outbox, kv, clock, client: aviapages?.client ?? null, config: opts.comms });
   const charters = new CharterRequestService({ db, fleet, legs, reference, outbox, pricing, comms, calculators, client: aviapages?.client ?? null, clock });
-  return { db, clock, fleet, legs, market, reference, kv, calcCache, aviapages, comms, calculators, charters, pricing, search, outbox, payments, bookings, alerts, ingest };
+  const onboarding = new OnboardingService({ db, fleet, reference, outbox, clock, opsEmail: opts.opsEmail });
+  return { db, clock, fleet, legs, market, reference, kv, calcCache, aviapages, comms, calculators, charters, onboarding, pricing, search, outbox, payments, bookings, alerts, ingest };
 }
 
 export type App = ReturnType<typeof createApp>;

@@ -7,9 +7,12 @@ below a regular one-way charter.
 ```
 npm install                  # dev tooling only — there are no runtime dependencies
 npm start                    # http://localhost:3000 — demo marketplace + Aviapages in mock mode
-npm test                     # 95 unit/integration tests
-npm run e2e                  # 14 browser end-to-end flows against a fresh server (needs Chromium*)
+npm test                     # 104 unit/integration tests
+npm run e2e                  # 18 browser end-to-end flows against a fresh server (needs Chromium*)
 npm run typecheck
+
+NODE_ENV=production ADMIN_KEY=… npm run start:prod   # empty marketplace for real operators
+npm run faa:import -- part135.xlsx                   # load the FAA Part 135 list (prospects)
 
 AVIAPAGES_API_KEY=… npm run aviapages:check     # day-1 live check of your Aviapages key
 AVIAPAGES_API_KEY=… npm run aviapages:harvest   # download as much as your budget allows
@@ -30,6 +33,10 @@ Environment: `PORT` (3000), `DB_PATH` (`data/emptylegs.db`), `ADMIN_KEY`, `SIMUL
 demo feed simulator, plus the Aviapages settings in **[docs/AVIAPAGES.md](docs/AVIAPAGES.md)**.
 Delete `data/` to reseed.
 
+**Launching with direct operators** (no paid data feed): production mode, signing operators from the
+FAA Part 135 list, and what's left before taking real money (payments, email, hosting, legal) are in
+**[docs/PRODUCTION.md](docs/PRODUCTION.md)**. Operators read `/operator-guide.html`.
+
 ## What it does
 
 The four hard problems, and where each lives:
@@ -40,6 +47,7 @@ The four hard problems, and where each lives:
 | **Search & inventory** — matching supply to what travelers want, fast | `src/inventory/search.ts` | In-memory index bucketed by origin airport; loose on what travelers flex on (nearby airports, ± days, "anywhere"), strict on seats, lead time and guardrailed price. ~1–3 ms per query. |
 | **Pricing** — all-in price with margin logic and guardrails | `src/pricing/` | Operator ask (or modelled repositioning rate) + fees + margin + taxes; 14 guardrails decide whether a number may reach a customer. |
 | **Booking & payments** — selected flight → confirmed, paid trip | `src/booking/` | Quote → hold + card authorization → operator confirms → capture. Idempotent, race-safe, with a balanced ledger and refunds when the operator cancels. |
+| **Operator supply** — signing and running direct operators | `src/onboarding/` | FAA Part 135 import (xlsx/csv) → prospect pipeline; operator applications; onboarding with portal + feed keys, fleet verified against the certificate; weekly one-click reconfirmation keeps listings current. |
 
 Plus route alerts (`src/alerts/`) evaluated on every inventory change, delivered through a
 transactional outbox.
@@ -71,7 +79,8 @@ Public
 - `GET  /api/bookings/:id?email=` · `POST /api/bookings/:id/cancel {email}`
 - `POST /api/alerts {email, from, to?, radiusNm?, pax?, maxPrice?, dateFrom?, dateTo?}`
 - `GET  /api/stream` — server-sent events when inventory changes
-- `GET  /api/config` — which integrations are enabled
+- `GET  /api/config` — which integrations are enabled, demo mode, whether bookings are open
+- `POST /api/operator-applications {company, name, email, phone?, certificateNumber?, fleet?, website?, message?}`
 - `POST /api/charter-requests {name, email, phone?, from, to, date, time?, pax, notes?}` → aircraft options
 - `POST /api/charter-requests/:id/send {email, aircraftIds[]}` · `GET /api/charter-requests/:id?email=`
 
@@ -81,11 +90,17 @@ Feeds (machine-to-machine, `Authorization: Bearer <feed key>`)
 Operator portal (`Authorization: Bearer <operator key>`)
 - `GET /api/operator/me|legs|bookings|threads` · `POST /api/operator/legs` (JSON or CSV)
 - `GET /api/operator/threads/:id` · `POST /api/operator/threads/:id/reply {body}`
-- `POST /api/operator/legs/:id/withdraw` · `POST /api/operator/bookings/:id/confirm|decline`
+- `POST /api/operator/legs/:id/withdraw` · `POST /api/operator/legs/reconfirm` (all still available)
+- `POST /api/operator/bookings/:id/confirm|decline`
 
 Ops (`Authorization: Bearer <admin key>`)
 - `GET /api/admin/review|ingest-errors|notifications|ledger|sources`
-- `POST /api/admin/legs/:id/approve-price` · `POST /api/admin/market {fuelCentsPerGal, fx{EUR}}`
+- `POST /api/admin/legs/:id/approve-price`
+- `GET|POST /api/admin/market {fuelCentsPerGal, fx{EUR}}` · `POST /api/admin/market/refresh-fx` (ECB)
+- `GET|POST /api/admin/operators` · `GET|PATCH /api/admin/operators/:id` · `POST /api/admin/operators/:id/keys {which: portal|feed}`
+- `POST /api/admin/operators/:id/aircraft {tail, typeCode | newType{name, category}, seats, homeBase, year?, override?}` · `DELETE /api/admin/operators/:id/aircraft/:tail` · `GET /api/admin/aircraft-types`
+- `POST /api/admin/faa/import` (raw .xlsx/.csv body, `application/octet-stream`) · `GET /api/admin/faa/stats`
+- `GET /api/admin/prospects?q=&status=&category=&minJets=` · `GET|PATCH /api/admin/prospects/:id {status, notes, contactName, contactEmail, contactPhone}`
 - `GET /api/admin/bookings?status=` · `POST /api/admin/bookings/:id/confirm|decline` (on behalf of network operators)
 - `GET /api/admin/threads?attention=1` · `GET /api/admin/threads/:id` · `POST /api/admin/threads/:id/messages|retry|resolve`
 - `GET /api/admin/charter-requests` · `GET /api/admin/integrations`

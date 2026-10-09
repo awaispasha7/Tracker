@@ -177,10 +177,10 @@ and the cancellation risk travelers carry (auth-then-capture, automatic refunds,
 | Search | in-process index | same design per node, rebuilt from a change stream; or Postgres + PostGIS for the candidate set |
 | Payments | `MockPaymentProvider` | Stripe PaymentIntents with `capture_method=manual` (implement `PaymentProvider`); wire transfer for large heavy-jet trips; 3DS |
 | Notifications | console sender | SES/Postmark + Twilio behind the `Sender` interface |
-| Market data | seeded fuel/FX | fuel index (e.g. regional Jet-A), FX provider, both refreshed on a schedule; `MARKET_FRESH` already blocks if they stall |
-| Feeds | push API + demo simulator | per-operator API keys rotated, scheduled pulls for pull-only aggregators, schema contracts per partner |
+| Market data | production mode: ECB daily FX every 6 h (AED via its USD peg); fuel set in Ops → Market, valid 30 days | a regional Jet-A index feed if modelled prices matter; `MARKET_FRESH`/`FX_AVAILABLE` already block when inputs stall |
+| Feeds | per-operator portal + feed keys issued and rotated in Ops → Operators; portal listings valid 7 days after the operator reconfirms, feed listings 24 h | scheduled pulls for pull-only systems, schema contracts per partner |
 | Auth | bearer keys, email-scoped booking lookup | traveler accounts (magic link), operator SSO, admin RBAC, audit log |
-| Compliance | agreement capture | legal review of the agreement, DOT Part 295 broker disclosures, operator certificate verification at onboarding, passenger document checks, PCI scope kept at the provider |
+| Compliance | agreement capture; fleet checked against the FAA Part 135 list at onboarding | legal review of the agreement, DOT Part 295 broker disclosures, passenger document checks, PCI scope kept at the provider |
 | Ops | `/admin` review queue | alerting when ingest error rate, quarantine rate or `PRICE_JUMP` holds spike |
 
 ## Aviapages integration
@@ -192,3 +192,14 @@ calculators (`src/integrations/aviapages/calculators.ts`: cached flight times an
 to pricing), and custom charter requests (`src/charter/`: offers become private legs booked through
 the normal flow). Setup, budgets and the trial plan: [AVIAPAGES.md](AVIAPAGES.md). What was tested:
 [FEATURE-CHECK.md](FEATURE-CHECK.md).
+
+## Direct operators (`src/onboarding/`)
+
+The launch inventory comes from operators signed directly, found in the FAA Part 135 list. The
+importer reads the FAA spreadsheet (a small built-in .xlsx reader, no dependency), classifies each
+aircraft's FAA model designation into a category and, where it can, one of our types, and builds a
+prospect per certificate holder. Prospect status and notes live in their own table, so re-importing
+the list keeps them; an operator applying through the site is matched to their FAA record by
+certificate designator, even if the list is imported afterwards. Onboarding creates the operator,
+its portal and feed sources (keys stored hashed, shown once) and its fleet; a tail that isn't on the
+operator's certificate needs an explicit override. Steps for launch: [PRODUCTION.md](PRODUCTION.md).

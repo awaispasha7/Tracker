@@ -14,7 +14,9 @@
     "typecheck": "tsc -p .",
     "e2e": "node --disable-warning=ExperimentalWarning scripts/e2e.ts",
     "aviapages:check": "node --disable-warning=ExperimentalWarning scripts/aviapages-check.ts",
-    "aviapages:harvest": "node --disable-warning=ExperimentalWarning scripts/aviapages-harvest.ts"
+    "aviapages:harvest": "node --disable-warning=ExperimentalWarning scripts/aviapages-harvest.ts",
+    "start:prod": "node --disable-warning=ExperimentalWarning src/server.ts --production",
+    "faa:import": "node --disable-warning=ExperimentalWarning scripts/faa-import.ts"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

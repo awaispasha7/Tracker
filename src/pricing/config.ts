@@ -32,7 +32,10 @@ export interface PricingConfig {
   /** A move larger than this vs. the last price shown needs a human to approve it. */
   priceJumpRatio: number;
   maxLegAgeMs: number;
+  /** FX rates older than this block non-USD prices. */
   maxMarketAgeMs: number;
+  /** The fuel index is set by ops and moves slowly; it may be this old. */
+  maxFuelAgeMs: number;
   minConfidence: number;
   minLeadTimeMs: number;
   quoteTtlMs: number;
@@ -74,6 +77,7 @@ export const DEFAULT_PRICING: PricingConfig = {
   priceJumpRatio: 0.35,
   maxLegAgeMs: 6 * HOUR,
   maxMarketAgeMs: 48 * HOUR,
+  maxFuelAgeMs: 30 * 24 * HOUR,
   minConfidence: 0.5,
   minLeadTimeMs: 3 * HOUR,
   quoteTtlMs: 15 * MINUTE,

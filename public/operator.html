@@ -16,11 +16,29 @@
     </div>
   </header>
   <main class="wrap">
-    <section id="login" class="card pad" style="max-width:460px;margin:48px auto">
-      <h2>Sign in</h2>
-      <p class="muted">Use your operator API key. In the demo, try <code>dev_op_skyline</code>, <code>dev_op_coastal</code>, <code>dev_op_pacific</code> or <code>dev_op_alpine</code>.</p>
-      <form class="stack" id="login-form"><label>API key<input id="key" required autocomplete="off"></label><button>Sign in</button></form>
-    </section>
+    <div id="login" class="grid2" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));align-items:start;margin:32px 0">
+      <section class="card pad">
+        <h2>Operator sign in</h2>
+        <p class="muted">Use the portal key we sent when your account was set up.</p>
+        <p class="muted" id="demo-keys" hidden>Demo keys: <code>dev_op_skyline</code>, <code>dev_op_coastal</code>, <code>dev_op_pacific</code> or <code>dev_op_alpine</code>.</p>
+        <form class="stack" id="login-form"><label>Portal key<input id="key" required autocomplete="off"></label><button>Sign in</button></form>
+        <p class="faint">How listing works, file formats and the feed API: <a href="/operator-guide.html">operator guide</a> · <a href="/empty-legs-template.csv" download>CSV template</a></p>
+      </section>
+      <section class="card pad" id="apply">
+        <h2>List your empty legs</h2>
+        <p class="muted">Part 135 / AOC operators: we sell your repositioning flights to travelers at one all-in price. No listing fee: you set your net ask, we add our fee on top, and you confirm every booking before the card is charged.</p>
+        <form class="stack" id="apply-form">
+          <div class="grid2"><label>Company<input name="company" required></label><label>FAA certificate designator<input name="certificateNumber" placeholder="e.g. ABCA123X"></label></div>
+          <div class="grid2"><label>Your name<input name="name" required></label><label>Email<input name="email" type="email" required></label></div>
+          <div class="grid2"><label>Phone<input name="phone"></label><label>Website<input name="website"></label></div>
+          <label>Fleet (types and how many)<input name="fleet" placeholder="2× Citation XLS, 1× Challenger 300"></label>
+          <label>Where do you publish empty legs today?<textarea name="message" rows="2" placeholder="Your website, a newsletter, a broker network…"></textarea></label>
+          <label class="hp" aria-hidden="true">Leave empty<input name="honeypot" tabindex="-1" autocomplete="off"></label>
+          <button>Apply</button>
+        </form>
+        <div id="apply-done" class="notice good" hidden></div>
+      </section>
+    </div>
 
     <section id="portal" hidden>
       <div class="hero" style="padding-bottom:0"><h1 id="op-name"></h1><p class="muted" id="op-meta"></p></div>
@@ -56,7 +74,7 @@
             <textarea id="csv" rows="8">tail,from,to,earliest,latest,price,currency,status
 </textarea>
             <button>Upload</button>
-            <p class="faint" style="margin:0">Times in ISO-8601 with offset, e.g. <code>2026-10-20T14:00:00Z</code>. Machine integrations: <code>POST /api/feeds/api:&lt;operator&gt;</code> with your feed key.</p>
+            <p class="faint" style="margin:0">Times in ISO-8601 with offset, e.g. <code>2026-10-20T14:00:00Z</code>. Template: <a href="/empty-legs-template.csv" download>CSV</a>. Machine integrations: <code>POST /api/feeds/api:&lt;operator&gt;</code> with your feed key (<a href="/operator-guide.html#feed">guide</a>).</p>
           </form>
         </div>
         <div id="post-result" style="margin-top:16px"></div>

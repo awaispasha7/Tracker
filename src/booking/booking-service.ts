@@ -227,9 +227,10 @@ export class BookingService {
         subject: `Request received: ${summary}`,
         body: `We've asked the operator to confirm ${summary} for ${b.pax} passenger(s). Your card is authorized for ${usd(b.total_cents)} and will only be charged once the operator confirms.`,
       }, later);
-      if (this.fleet.getOperator(b.operator_id)?.source !== 'aviapages') {
+      const operator = this.fleet.getOperator(b.operator_id);
+      if (operator?.source !== 'aviapages') {
         this.outbox.enqueue({
-          dedupeKey: `booking:${bookingId}:operator_request`, recipient: `operator:${b.operator_id}`,
+          dedupeKey: `booking:${bookingId}:operator_request`, recipient: operator?.contact?.email ?? `operator:${b.operator_id}`,
           subject: `Confirm booking ${bookingId}: ${summary}`,
           body: `A traveler has requested your empty leg ${summary} (${leg.tail}). Payout ${usd(b.operator_payout_cents)}. Confirm or decline before ${new Date(b.hold_expires_at!).toISOString()}.`,
         }, later);
